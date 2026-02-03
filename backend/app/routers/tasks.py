@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.repository.tasks import TaskRepository
 from app.repository.users import UserRepository
-from app.schemas.task import TaskCreateIn, TaskOut
+from app.schemas.task import TaskCreateIn, TaskOut, TaskCreateFromBotIn
 
 router = APIRouter(prefix="/tasks", tags=["Задачи"])
 
@@ -41,3 +41,19 @@ async def list_personal_tasks(
         return []
 
     return await TaskRepository.list_by_owner(db, user.id)
+
+
+@router.post("", response_model=TaskOut, status_code=status.HTTP_201_CREATED)
+async def create_task_from_bot(
+    payload: TaskCreateFromBotIn,
+    db: AsyncSession = Depends(get_db),
+):
+    return await TaskRepository.create_from_bot(
+        db,
+        telegram_id=payload.telegram_id,
+        title=payload.title,
+        description=payload.description,
+        remind_at=payload.remind_at,
+        username=payload.username,
+        first_name=payload.first_name,
+    )

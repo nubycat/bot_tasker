@@ -3,19 +3,6 @@ from pydantic import BaseModel, Field, field_validator
 from app.core.time_utils import normalize_time_hhmm
 
 
-class TaskCreateFromBotIn(BaseModel):
-    telegram_id: int = Field(gt=0)
-    title: str = Field(min_length=1, max_length=120)
-    description: str | None = Field(default=None, max_length=5000)
-    remind_at: str
-
-    @field_validator("remind_at")
-    @classmethod
-    def validate_remind_at(cls, v: str) -> str:
-        # превращает "18" -> "18:00", "8:3" -> "08:03"
-        return normalize_time_hhmm(v)
-
-
 class TaskCreateIn(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=1500)
@@ -35,18 +22,27 @@ class TaskOut(BaseModel):
         from_attributes = True
 
 
-#
 class TaskCreateFromBotIn(BaseModel):
     """
-    Input-схема для создания задачи из Telegram-бота.
+    Схема входных данных для создания задачи из Telegram-бота.
 
-    Отличается от TaskCreateIn: бот присылает только время (remind_at),
-    а не полный datetime (due_at).
+    Почему отдельная схема:
+    - TaskCreateIn использует due_at (полный datetime)
+    - бот присылает только время remind_at строкой: "18" или "18:30"
+      (нормализуется через normalize_time_hhmm)
+
+    Дополнительно бот присылает telegram_id и данные профиля.
     """
 
     telegram_id: int = Field(gt=0)
     title: str = Field(min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=1500)
-    remind_at: str = Field(min_length=1, max_length=5)
+    remind_at: str = Field(min_length=1, max_length=5)  # "18" or "18:30"
     username: str | None = Field(default=None, max_length=64)
     first_name: str | None = Field(default=None, max_length=64)
+
+    @field_validator("remind_at")
+    @classmethod
+    def validate_remind_at(cls, v: str) -> str:
+        # "18" -> "18:00", "8:3" -> "08:03"
+        return normalize_time_hhmm(v)

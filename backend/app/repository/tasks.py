@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.task import Task
@@ -80,3 +80,10 @@ class TaskRepository:
             .order_by(Task.id.desc())
         )
         return list(res.scalars().all())
+
+    @staticmethod
+    async def count_by_owner(db: AsyncSession, owner_user_id: int) -> int:
+        res = await db.execute(
+            select(func.count(Task.id)).where(Task.owner_user_id == owner_user_id)
+        )
+        return int(res.scalar_one())

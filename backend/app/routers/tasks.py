@@ -44,6 +44,19 @@ async def list_personal_tasks(
     return await TaskRepository.list_by_owner(db, user.id)
 
 
+@router.get("/personal/count")
+async def count_personal_tasks(
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        return {"count": 0}
+
+    count = await TaskRepository.count_by_owner(db, user.id)
+    return {"count": count}
+
+
 @router.post("", response_model=TaskOut, status_code=status.HTTP_201_CREATED)
 async def create_task_from_bot(
     payload: TaskCreateFromBotIn,

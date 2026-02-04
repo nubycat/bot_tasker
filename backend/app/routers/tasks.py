@@ -11,14 +11,15 @@ router = APIRouter(prefix="/tasks", tags=["Задачи"])
 
 @router.post("/personal", response_model=TaskOut)
 async def create_personal_task(
+    payload: TaskCreateIn,
     telegram_id: int = Query(gt=0),
-    payload: TaskCreateIn = ...,
     db: AsyncSession = Depends(get_db),
 ):
     user = await UserRepository.get_by_telegram_id(db, telegram_id)
     if user is None:
         raise HTTPException(
-            status_code=404, detail="User not found. Call /users/upsert first."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found. Call /users/upsert first.",
         )
 
     return await TaskRepository.create_personal(

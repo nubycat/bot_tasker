@@ -87,3 +87,23 @@ class TaskRepository:
             select(func.count(Task.id)).where(Task.owner_user_id == owner_user_id)
         )
         return int(res.scalar_one())
+
+    @staticmethod
+    async def list_today_by_owner(
+        db: AsyncSession,
+        owner_user_id: int,
+        day_start: datetime,
+        day_end: datetime,
+    ) -> list[Task]:
+        """Return owner's tasks due within [day_start, day_end), ordered by due_at."""
+        res = await db.execute(
+            select(Task)
+            .where(
+                Task.owner_user_id == owner_user_id,
+                Task.due_at.is_not(None),
+                Task.due_at >= day_start,
+                Task.due_at < day_end,
+            )
+            .order_by(Task.due_at.asc())
+        )
+        return list(res.scalars().all())

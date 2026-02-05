@@ -1,3 +1,5 @@
+from datetime import datetime, time, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,3 +73,20 @@ async def create_task_from_bot(
         username=payload.username,
         first_name=payload.first_name,
     )
+
+
+@router.get("/personal/today", response_model=list[TaskOut])
+async def list_personal_today(
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Возвращает задачи на сегодня для пользователя по telegram_id."""
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        return []
+
+    now = datetime.now()
+    day_start = datetime.combine(now.date(), time.min)
+    day_end = day_start + timedelta(days=1)
+
+    return await TaskRepository.list_today_by_owner(db, user.id, day_start, day_end)

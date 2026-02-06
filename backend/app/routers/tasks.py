@@ -90,3 +90,28 @@ async def list_personal_today(
     day_end = day_start + timedelta(days=1)
 
     return await TaskRepository.list_today_by_owner(db, user.id, day_start, day_end)
+
+
+@router.get("/personal/{task_id}", response_model=TaskOut)
+async def get_personal_task(
+    task_id: int,
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    task = await TaskRepository.get_personal_by_id(
+        db,
+        task_id=task_id,
+        owner_user_id=user.id,
+    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
+    return task

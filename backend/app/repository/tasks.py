@@ -107,3 +107,39 @@ class TaskRepository:
             .order_by(Task.due_at.asc())
         )
         return list(res.scalars().all())
+
+    @staticmethod
+    async def get_personal_by_id(
+        db: AsyncSession,
+        *,
+        task_id: int,
+        owner_user_id: int,
+    ) -> Task | None:
+        """
+        Получить **личную** задачу по её ID, но **только если она принадлежит** указанному владельцу.
+
+        Метод делает выборку из таблицы задач с двумя условиями:
+        - `Task.id == task_id`
+        - `Task.owner_user_id == owner_user_id`
+
+        Это защищает от доступа к чужим задачам: если задача существует, но владелец другой —
+        вернётся `None`, как будто задачи нет.
+
+        Args:
+            db: Асинхронная сессия SQLAlchemy (`AsyncSession`).
+            task_id: Идентификатор задачи.
+            owner_user_id: Идентификатор пользователя-владельца задачи.
+
+        Returns:
+            `Task`, если задача найдена и принадлежит пользователю, иначе `None`.
+
+        Notes:
+            - Возвращает один объект или `None` (по фильтру `Task.id`).
+        """
+        res = await db.execute(
+            select(Task).where(
+                Task.id == task_id,
+                Task.owner_user_id == owner_user_id,
+            )
+        )
+        return res.scalar_one_or_none()

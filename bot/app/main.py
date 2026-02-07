@@ -3,9 +3,11 @@ import os
 
 
 import httpx
-from fastapi import status
+
+# from fastapi import status
 from datetime import datetime
 from httpx import RequestError, HTTPStatusError
+from http import HTTPStatus
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
@@ -189,7 +191,7 @@ async def on_today_task(callback: CallbackQuery) -> None:
     except HTTPStatusError as e:
         # Backend ответил, но статус не 2xx
         code = e.response.status_code
-        if code == status.HTTP_404_NOT_FOUND:
+        if code == HTTPStatus.NOT_FOUND:
             await callback.message.answer("Задача не найдена или не доступна.")
         else:
             await callback.message.answer(f"Ошибка backend: {code}")

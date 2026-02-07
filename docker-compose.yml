@@ -11,5 +11,25 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  backend:
+    build:
+      context: ./backend
+    container_name: tasker_backend
+    depends_on:
+      - db
+    env_file:
+      - ./backend/.env
+    ports:
+      - "8000:8000"
+
+  bot:
+    build:
+      context: ./bot
+    container_name: tasker_bot
+    depends_on:
+      - backend
+    env_file:
+      - ./bot/.env
+
 volumes:
   pgdata:

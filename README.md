@@ -127,7 +127,13 @@ cp .env.example .env
 ### 3️⃣ Запустить через Docker
 
 ```bash
-docker-compose up --build
+docker compose up -d --build
+```
+
+### 4️⃣ Применить миграции базы (обязательно)
+
+```bash
+docker compose exec backend alembic upgrade head
 ```
 
 Backend будет доступен по адресу:
@@ -179,3 +185,11 @@ GitHub: [https://github.com/nubycat](https://github.com/nubycat)
 > Проект развивается и используется как основное портфолио для backend-ролей
 
 ---
+
+
+
+
+
+
+
+

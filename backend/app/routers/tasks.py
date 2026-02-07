@@ -1,4 +1,6 @@
 from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +11,7 @@ from app.repository.users import UserRepository
 from app.schemas.task import TaskCreateIn, TaskOut, TaskCreateFromBotIn
 
 router = APIRouter(prefix="/tasks", tags=["Задачи"])
+TZ = ZoneInfo(os.getenv("APP_TZ", "UTC"))
 
 
 @router.post("/personal", response_model=TaskOut)
@@ -85,8 +88,8 @@ async def list_personal_today(
     if user is None:
         return []
 
-    now = datetime.now()
-    day_start = datetime.combine(now.date(), time.min)
+    now_msk = datetime.now(TZ).replace(tzinfo=None)
+    day_start = datetime.combine(now_msk.date(), time.min)
     day_end = day_start + timedelta(days=1)
 
     return await TaskRepository.list_today_by_owner(db, user.id, day_start, day_end)

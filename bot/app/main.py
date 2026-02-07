@@ -159,10 +159,15 @@ async def on_today(callback: CallbackQuery) -> None:
         hhmm = format_due_hhmm(t["due_at"])
         kb.button(text=f"{hhmm} — {title}", callback_data=f"today_task:{task_id}")
 
-    kb.button(text="⬅ Назад", callback_data="task:today:personal")
+    kb.button(text="⬅ В меню", callback_data="menu:personal")
     kb.adjust(1)
 
-    await callback.message.answer("Задачи на сегодня:", reply_markup=kb.as_markup())
+    try:
+        await callback.message.edit_text(
+            "Задачи на сегодня:", reply_markup=kb.as_markup()
+        )
+    except Exception:
+        await callback.message.answer("Задачи на сегодня:", reply_markup=kb.as_markup())
     await callback.answer()
 
 
@@ -210,7 +215,20 @@ async def on_today_task(callback: CallbackQuery) -> None:
     kb.button(text="⬅ Назад к списку", callback_data="task:today:personal")
     kb.adjust(1)
 
-    await callback.message.answer(text, reply_markup=kb.as_markup())
+    try:
+        await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    except Exception:
+        await callback.message.answer(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+# Хендлер меню личного режима
+@router.callback_query(F.data == "menu:personal")
+async def on_menu_personal(callback: CallbackQuery) -> None:
+    """Show personal mode menu."""
+    await callback.message.edit_text(
+        "Меню (лично):", reply_markup=mode_menu_kb("personal")
+    )
     await callback.answer()
 
 

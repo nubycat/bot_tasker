@@ -143,3 +143,59 @@ class TaskRepository:
             )
         )
         return res.scalar_one_or_none()
+
+    # TODO: open/done
+    @staticmethod
+    async def list_today_open_by_owner(db, owner_user_id: int, day_start, day_end):
+        """
+        Возвращает выполненные задачи ("done") владельца за сегодня.
+        Фильтр по due_at: [day_start, day_end), сортировка по due_at ASC.
+        """
+        stmt = (
+            select(Task)
+            .where(
+                Task.owner_user_id == owner_user_id,
+                Task.due_at >= day_start,
+                Task.due_at < day_end,
+                Task.status == "todo",
+            )
+            .order_by(Task.due_at.asc())
+        )
+        res = await db.execute(stmt)
+        return res.scalars().all()
+
+    @staticmethod
+    async def list_today_done_by_owner(db, owner_user_id: int, day_start, day_end):
+        """
+        Возвращает выполненные задачи ("done") владельца за сегодня.
+        Фильтр по due_at: [day_start, day_end), сортировка по due_at ASC.
+        """
+        stmt = (
+            select(Task)
+            .where(
+                Task.owner_user_id == owner_user_id,
+                Task.due_at >= day_start,
+                Task.due_at < day_end,
+                Task.status == "done",
+            )
+            .order_by(Task.due_at.asc())
+        )
+        res = await db.execute(stmt)
+        return res.scalars().all()
+
+    @staticmethod
+    async def mark_done_personal(
+        db, *, task_id: int, owner_user_id: int
+    ) -> Task | None:
+        task = await TaskRepository.get_personal_by_id(
+            db,
+            task_id=task_id,
+            owner_user_id=owner_user_id,
+        )
+        if task is None:
+            return None
+
+        task.status = "done"
+        await db.commit()
+        await db.refresh(task)
+        return task

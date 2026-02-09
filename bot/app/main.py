@@ -223,7 +223,7 @@ async def on_today_task(callback: CallbackQuery) -> None:
     desc = (t.get("description") or "").strip() or "(без описания)"
     hhmm = format_due_hhmm(t["due_at"])
 
-    text = f"#{t['id']}\n{title}\n\n{desc}\n\n\nВремя: {hhmm}"
+    text = f"#{t['id']}\n\n{title}\n\n{desc}\n\nВремя: {hhmm}"
 
     # 4) Кнопки действий
     kb = InlineKeyboardBuilder()
@@ -397,7 +397,14 @@ async def fsm_remind_at(message: Message, state: FSMContext) -> None:
         return
 
     await state.clear()
+
     await message.answer(f"Task created ✅ (#{task.get('id')})")
+
+    # UX: возвращаем пользователя в меню Personal, чтобы не скроллить вверх
+    await message.answer(
+        "Режим: Лично ✅",
+        reply_markup=mode_menu_kb("personal"),
+    )
 
 
 async def main() -> None:

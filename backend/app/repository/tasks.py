@@ -199,3 +199,24 @@ class TaskRepository:
         await db.commit()
         await db.refresh(task)
         return task
+
+    @staticmethod
+    async def snooze_to_tomorrow_personal(
+        db,
+        *,
+        task_id: int,
+        owner_user_id: int,
+    ):
+        task = await TaskRepository.get_personal_by_id(
+            db,
+            task_id=task_id,
+            owner_user_id=owner_user_id,
+        )
+        if task is None:
+            return None
+
+        task.due_at = task.due_at + timedelta(days=1)
+
+        await db.commit()
+        await db.refresh(task)
+        return task

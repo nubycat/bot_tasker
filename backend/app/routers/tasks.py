@@ -154,3 +154,29 @@ async def mark_personal_done(
         )
 
     return task
+
+
+@router.patch("/personal/{task_id}/tomorrow", response_model=TaskOut)
+async def move_personal_task_to_tomorrow(
+    task_id: int,
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Переносит личную задачу на завтра (due_at + 1 day)."""
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    task = await TaskRepository.snooze_to_tomorrow_personal(
+        db,
+        task_id=task_id,
+        owner_user_id=user.id,
+    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
+    return task

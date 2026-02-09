@@ -63,9 +63,9 @@ def mode_choose_kb():
 
 def mode_menu_kb(mode: str):
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Add task", callback_data=f"task:add:{mode}")
-    kb.button(text="📅 Today", callback_data=f"task:today:{mode}")
-    kb.button(text="⬅️ Back", callback_data="mode:choose")
+    kb.button(text="➕ Добавить задачу", callback_data=f"task:add:{mode}")
+    kb.button(text="📅 Задачи сегодня", callback_data=f"task:today:{mode}")
+    kb.button(text="⬅️ Выбор режима", callback_data="mode:choose")
     kb.adjust(2, 1)
     return kb.as_markup()
 
@@ -162,7 +162,7 @@ async def render_today(message, *, tg_id: int) -> None:
     # Выполненные (коротко)
     for t in done_tasks:
         title = (t.get("title") or "").strip() or "(без названия)"
-        kb.button(text=f"{title} | Done ✅", callback_data=CB_NOOP)
+        kb.button(text=f"{title} | Выполнено ✅", callback_data=CB_NOOP)
 
     kb.button(text="⬅ В меню", callback_data="menu:personal")
     kb.adjust(1)
@@ -183,29 +183,6 @@ async def on_today(callback: CallbackQuery) -> None:
 
     tg_id = callback.from_user.id
     await render_today(callback.message, tg_id=tg_id)
-    await callback.answer()
-
-    # Невыполненные (с временем)
-    for t in open_tasks:
-        task_id = t["id"]
-        title = (t.get("title") or "").strip() or "(без названия)"
-        hhmm = format_due_hhmm(t["due_at"])
-        kb.button(text=f"{hhmm} — {title}", callback_data=f"today_task:{task_id}")
-
-    # Выполненные (коротко, без времени)
-    for t in done_tasks:
-        title = (t.get("title") or "").strip() or "(без названия)"
-        kb.button(text=f"{title} | Done ✅", callback_data=CB_NOOP)
-
-    kb.button(text="⬅ В меню", callback_data="menu:personal")
-    kb.adjust(1)
-
-    try:
-        await callback.message.edit_text(
-            "Задачи на сегодня:", reply_markup=kb.as_markup()
-        )
-    except Exception:
-        await callback.message.answer("Задачи на сегодня:", reply_markup=kb.as_markup())
     await callback.answer()
 
 
@@ -246,12 +223,12 @@ async def on_today_task(callback: CallbackQuery) -> None:
     desc = (t.get("description") or "").strip() or "(без описания)"
     hhmm = format_due_hhmm(t["due_at"])
 
-    text = f"#{t['id']}\n{title}\n\n{desc}\nВремя: {hhmm}"
+    text = f"#{t['id']}\n{title}\n\n{desc}\n\n\nВремя: {hhmm}"
 
     # 4) Кнопки действий
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Done", callback_data=f"task_done:{t['id']}")
-    kb.button(text="⏰ Snooze", callback_data=f"task_snooze:{t['id']}")
+    kb.button(text="✅ Выполненно", callback_data=f"task_done:{t['id']}")
+    kb.button(text="⏭ На завтра", callback_data=f"task_tomorrow:{t['id']}")
     kb.button(text="⬅ Назад к списку", callback_data="task:today:personal")
     kb.adjust(2, 1)
 
@@ -290,11 +267,32 @@ async def on_task_done(callback: CallbackQuery) -> None:
     await callback.answer("Готово ✅")
 
 
-# Хендлер на клик по кнопке Snooze
-@router.callback_query(F.data.startswith("task_snooze:"))
-async def on_task_snooze(callback: CallbackQuery) -> None:
-    await callback.answer("Snooze пока не готов 🙂", show_alert=True)
-    await render_today(callback.message, tg_id=callback.from_user.id)
+@router.callback_query(F.data.startswith("task_tomorrow:"))
+async def on_task_tomorrow(callback: CallbackQuery) -> None:
+    tg_id = callback.from_user.id
+
+    try:
+        task_id = int((callback.data or "").split(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer("Некорректный id", show_alert=True)
+        return
+
+    try:
+        await backend_patch(
+            f"/tasks/personal/{task_id}/tomorrow", params={"telegram_id": tg_id}
+        )
+    except RequestError:
+        await callback.answer("Backend недоступен 😕", show_alert=True)
+        return
+    except HTTPStatusError as e:
+        await callback.answer(
+            f"Ошибка backend: {e.response.status_code}", show_alert=True
+        )
+        return
+
+    # Возвращаемся к списку Today (через render_today, НЕ меняя callback.data)
+    await render_today(callback.message, tg_id=tg_id)
+    await callback.answer("Перенёс на завтра ⏭")
 
 
 # Хендлер меню личного режима

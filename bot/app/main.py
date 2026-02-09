@@ -159,10 +159,11 @@ async def render_today(message, *, tg_id: int) -> None:
         hhmm = format_due_hhmm(t["due_at"])
         kb.button(text=f"{hhmm} — {title}", callback_data=f"today_task:{task_id}")
 
-    # Выполненные (коротко)
+    # Выполненные (коротко) — тоже кликабельные
     for t in done_tasks:
+        task_id = t["id"]
         title = (t.get("title") or "").strip() or "(без названия)"
-        kb.button(text=f"{title} | Выполнено ✅", callback_data=CB_NOOP)
+        kb.button(text=f"{title} | Выполнено ✅", callback_data=f"done_task:{task_id}")
 
     kb.button(text="⬅ В меню", callback_data="menu:personal")
     kb.adjust(1)
@@ -231,6 +232,55 @@ async def on_today_task(callback: CallbackQuery) -> None:
     kb.button(text="⏭ На завтра", callback_data=f"task_tomorrow:{t['id']}")
     kb.button(text="⬅ Назад к списку", callback_data="task:today:personal")
     kb.adjust(2, 1)
+
+    try:
+        await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    except Exception:
+        await callback.message.answer(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+# Хендлер на клик по выполненной задаче done_task:<id>
+@router.callback_query(F.data.startswith("done_task:"))
+async def on_done_task(callback: CallbackQuery) -> None:
+    tg_id = callback.from_user.id
+
+    # 1) Достаём task_id из callback_data вида "done_task:<id>"
+    try:
+        task_id = int((callback.data or "").split(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer()
+        return
+
+    # 2) Запрашиваем детали задачи
+    try:
+        t = await backend_get(
+            f"/tasks/personal/{task_id}", params={"telegram_id": tg_id}
+        )
+    except RequestError:
+        await callback.message.answer("Backend недоступен 😕 Попробуй позже.")
+        await callback.answer()
+        return
+    except HTTPStatusError as e:
+        code = e.response.status_code
+        if code == 404:
+            await callback.message.answer("Задача не найдена или недоступна.")
+        else:
+            await callback.message.answer(f"Ошибка backend: {code}")
+        await callback.answer()
+        return
+
+    # 3) Формируем карточку
+    title = (t.get("title") or "").strip() or "(без названия)"
+    desc = (t.get("description") or "").strip() or "(без описания)"
+    hhmm = format_due_hhmm(t["due_at"])
+
+    text = f"#{t['id']} ✅ Выполнено\n{title}\n\n{desc}\nВремя: {hhmm}"
+
+    # 4) Только “назад к списку”
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⬅ Назад к списку", callback_data="task:today:personal")
+    kb.adjust(1)
 
     try:
         await callback.message.edit_text(text, reply_markup=kb.as_markup())

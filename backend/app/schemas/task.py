@@ -28,7 +28,7 @@ class TaskCreateFromBotIn(BaseModel):
 
     Почему отдельная схема:
     - TaskCreateIn использует due_at (полный datetime)
-    - бот присылает только время remind_at строкой: "18" или "18:30"
+    - бот присылает только время remind_at строкой: "18" или "18:30 или 1830"
       (нормализуется через normalize_time_hhmm)
 
     Дополнительно бот присылает telegram_id и данные профиля.
@@ -44,5 +44,20 @@ class TaskCreateFromBotIn(BaseModel):
     @field_validator("remind_at")
     @classmethod
     def validate_remind_at(cls, v: str) -> str:
-        # "18" -> "18:00", "8:3" -> "08:03"
+        # "18" -> "18:00", "8:3" -> "08:03", "1830" -> "18:30"
         return normalize_time_hhmm(v)
+
+
+class TodayTasksOut(BaseModel):
+    """
+    TodayTasksOut — схема ответа для эндпоинта "задачи на сегодня".
+
+    Поля:
+    - open: список невыполненных задач (TaskOut)
+    - done: список выполненных задач (TaskOut)
+
+    Если задач нет — возвращаются пустые списки [].
+    """
+
+    open: list[TaskOut]
+    done: list[TaskOut]

@@ -1,8 +1,13 @@
 import asyncio
 import os
 
+
 import httpx
+
+# from fastapi import status
+from datetime import datetime
 from httpx import RequestError, HTTPStatusError
+from http import HTTPStatus
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
@@ -15,6 +20,29 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
+CB_NOOP = "noop"
+
+
+# ---- helpers ----
+async def backend_get(path: str, *, params: dict) -> dict | list:
+    """GET JSON from backend."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(f"{BACKEND_URL}{path}", params=params)
+        r.raise_for_status()
+        return r.json()
+
+
+async def backend_patch(path: str, *, params: dict) -> dict:
+    """PATCH JSON from backend."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.patch(f"{BACKEND_URL}{path}", params=params)
+        r.raise_for_status()
+        return r.json()
+
+
+# ---------- Utils ----------
+def format_due_hhmm(iso_dt: str) -> str:
+    return datetime.fromisoformat(iso_dt).strftime("%H:%M")
 
 
 # ---------- FSM ----------
@@ -35,9 +63,10 @@ def mode_choose_kb():
 
 def mode_menu_kb(mode: str):
     kb = InlineKeyboardBuilder()
-    kb.button(text="➕ Add task", callback_data=f"task:add:{mode}")
-    kb.button(text="⬅️ Back", callback_data="mode:choose")
-    kb.adjust(1, 1)
+    kb.button(text="➕ Добавить задачу", callback_data=f"task:add:{mode}")
+    kb.button(text="📅 Задачи сегодня", callback_data=f"task:today:{mode}")
+    kb.button(text="⬅️ Выбор режима", callback_data="mode:choose")
+    kb.adjust(2, 1)
     return kb.as_markup()
 
 
@@ -85,9 +114,10 @@ async def on_mode(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+#  создание задачи
 @router.callback_query(F.data.startswith("task:add:"))
 async def on_task_add(callback: CallbackQuery, state: FSMContext) -> None:
-    # mode пока просто запомним (на будущее)
+    # mode  (на будущее)
     mode = (callback.data or "").split(":")[-1]
     await state.update_data(mode=mode)
 
@@ -96,6 +126,250 @@ async def on_task_add(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.answer(
         f"Ок ✅ Создаём задачу ({mode}). Пришли *title*.", parse_mode="Markdown"
     )
+    await callback.answer()
+
+
+#  Хендлер на кнопку 📅 Today (только для personal)
+async def render_today(message, *, tg_id: int) -> None:
+    """Рисует список Today (open/done) в указанном message."""
+    try:
+        data = await backend_get("/tasks/personal/today", params={"telegram_id": tg_id})
+    except RequestError:
+        await message.answer("Backend недоступен 😕 Попробуй позже.")
+        return
+    except HTTPStatusError as e:
+        await message.answer(f"Ошибка backend: {e.response.status_code}")
+        return
+
+    open_tasks = data.get("open", [])
+    done_tasks = data.get("done", [])
+
+    if not open_tasks and not done_tasks:
+        await message.answer(
+            "Сегодня задач нет ✅", reply_markup=mode_menu_kb("personal")
+        )
+        return
+
+    kb = InlineKeyboardBuilder()
+
+    # Невыполненные (с временем)
+    for t in open_tasks:
+        task_id = t["id"]
+        title = (t.get("title") or "").strip() or "(без названия)"
+        hhmm = format_due_hhmm(t["due_at"])
+        kb.button(text=f"{hhmm} — {title}", callback_data=f"today_task:{task_id}")
+
+    # Выполненные (коротко) — тоже кликабельные
+    for t in done_tasks:
+        task_id = t["id"]
+        title = (t.get("title") or "").strip() or "(без названия)"
+        kb.button(text=f"{title} | Выполнено ✅", callback_data=f"done_task:{task_id}")
+
+    kb.button(text="⬅ В меню", callback_data="menu:personal")
+    kb.adjust(1)
+
+    try:
+        await message.edit_text("Задачи на сегодня:", reply_markup=kb.as_markup())
+    except Exception:
+        await message.answer("Задачи на сегодня:", reply_markup=kb.as_markup())
+
+
+@router.callback_query(F.data.startswith("task:today:"))
+async def on_today(callback: CallbackQuery) -> None:
+    mode = (callback.data or "").split(":")[-1]
+    if mode != "personal":
+        await callback.message.answer("Today пока только для личных задач ✅")
+        await callback.answer()
+        return
+
+    tg_id = callback.from_user.id
+    await render_today(callback.message, tg_id=tg_id)
+    await callback.answer()
+
+
+# Хендлер на клик по задаче today_task:<id> (детали)
+@router.callback_query(F.data.startswith("today_task:"))
+async def on_today_task(callback: CallbackQuery) -> None:
+    """Open task card from Today list: fetch task details and show formatted message."""
+    tg_id = callback.from_user.id
+
+    # 1) Достаём task_id из callback_data вида "today_task:<id>"
+    try:
+        task_id = int((callback.data or "").split(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer()
+        return
+
+    # 2) Запрашиваем детали задачи в backend (проверка доступа идёт по telegram_id)
+    try:
+        t = await backend_get(
+            f"/tasks/personal/{task_id}", params={"telegram_id": tg_id}
+        )
+    except RequestError:
+        await callback.message.answer("Backend недоступен 😕 Попробуй позже.")
+        await callback.answer()
+        return
+    except HTTPStatusError as e:
+        # Backend ответил, но статус не 2xx
+        code = e.response.status_code
+        if code == HTTPStatus.NOT_FOUND:
+            await callback.message.answer("Задача не найдена или не доступна.")
+        else:
+            await callback.message.answer(f"Ошибка backend: {code}")
+        await callback.answer()
+        return
+
+    # 3) Формируем карточку (подчищаем пустые поля)
+    title = (t.get("title") or "").strip() or "(без названия)"
+    desc = (t.get("description") or "").strip() or "(без описания)"
+    hhmm = format_due_hhmm(t["due_at"])
+
+    text = f"#{t['id']}\n\n{title}\n\n{desc}\n\nВремя: {hhmm}"
+
+    # 4) Кнопки действий
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Выполненно", callback_data=f"task_done:{t['id']}")
+    kb.button(text="⏭ На завтра", callback_data=f"task_tomorrow:{t['id']}")
+    kb.button(text="⬅ Назад к списку", callback_data="task:today:personal")
+    kb.adjust(2, 1)
+
+    try:
+        await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    except Exception:
+        await callback.message.answer(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+# Хендлер на клик по выполненной задаче done_task:<id>
+@router.callback_query(F.data.startswith("done_task:"))
+async def on_done_task(callback: CallbackQuery) -> None:
+    tg_id = callback.from_user.id
+
+    # 1) Достаём task_id из callback_data вида "done_task:<id>"
+    try:
+        task_id = int((callback.data or "").split(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer()
+        return
+
+    # 2) Запрашиваем детали задачи
+    try:
+        t = await backend_get(
+            f"/tasks/personal/{task_id}", params={"telegram_id": tg_id}
+        )
+    except RequestError:
+        await callback.message.answer("Backend недоступен 😕 Попробуй позже.")
+        await callback.answer()
+        return
+    except HTTPStatusError as e:
+        code = e.response.status_code
+        if code == 404:
+            await callback.message.answer("Задача не найдена или недоступна.")
+        else:
+            await callback.message.answer(f"Ошибка backend: {code}")
+        await callback.answer()
+        return
+
+    # 3) Формируем карточку
+    title = (t.get("title") or "").strip() or "(без названия)"
+    desc = (t.get("description") or "").strip() or "(без описания)"
+    hhmm = format_due_hhmm(t["due_at"])
+
+    text = f"#{t['id']} ✅ Выполнено\n{title}\n\n{desc}\nВремя: {hhmm}"
+
+    # 4) Только “назад к списку”
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⬅ Назад к списку", callback_data="task:today:personal")
+    kb.adjust(1)
+
+    try:
+        await callback.message.edit_text(text, reply_markup=kb.as_markup())
+    except Exception:
+        await callback.message.answer(text, reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+# Хендлер на клик по кнопке Done
+@router.callback_query(F.data.startswith("task_done:"))
+async def on_task_done(callback: CallbackQuery) -> None:
+    tg_id = callback.from_user.id
+
+    try:
+        task_id = int((callback.data or "").split(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer("Некорректный id", show_alert=True)
+        return
+
+    try:
+        await backend_patch(
+            f"/tasks/personal/{task_id}/done", params={"telegram_id": tg_id}
+        )
+    except RequestError:
+        await callback.answer("Backend недоступен 😕", show_alert=True)
+        return
+    except HTTPStatusError as e:
+        await callback.answer(
+            f"Ошибка backend: {e.response.status_code}", show_alert=True
+        )
+        return
+
+    await render_today(callback.message, tg_id=tg_id)
+    await callback.answer("Готово ✅")
+
+
+@router.callback_query(F.data.startswith("task_tomorrow:"))
+async def on_task_tomorrow(callback: CallbackQuery) -> None:
+    tg_id = callback.from_user.id
+
+    try:
+        task_id = int((callback.data or "").split(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer("Некорректный id", show_alert=True)
+        return
+
+    try:
+        await backend_patch(
+            f"/tasks/personal/{task_id}/tomorrow", params={"telegram_id": tg_id}
+        )
+    except RequestError:
+        await callback.answer("Backend недоступен 😕", show_alert=True)
+        return
+    except HTTPStatusError as e:
+        await callback.answer(
+            f"Ошибка backend: {e.response.status_code}", show_alert=True
+        )
+        return
+
+    # Возвращаемся к списку Today (через render_today, НЕ меняя callback.data)
+    await render_today(callback.message, tg_id=tg_id)
+    await callback.answer("Перенёс на завтра ⏭")
+
+
+# Хендлер меню личного режима
+@router.callback_query(F.data == "menu:personal")
+async def on_menu_personal(callback: CallbackQuery) -> None:
+    """Show personal mode menu."""
+    await callback.message.edit_text(
+        "Меню (лично):", reply_markup=mode_menu_kb("personal")
+    )
+    await callback.answer()
+
+
+# Пустой callback: нужен для "информационных" кнопок, которые ничего не делают
+@router.callback_query(F.data == CB_NOOP)
+async def on_noop(callback: CallbackQuery) -> None:
+    """
+    Заглушка для inline-кнопок, которые не выполняют действий.
+
+    Зачем:
+    - Telegram ожидает callback.answer() на любое нажатие inline-кнопки.
+      Если не ответить, у пользователя может "крутиться" загрузка.
+    - Используется для кнопок-меток (например: "Done ✅", "Недоступно", "Только просмотр").
+
+    Поведение:
+    - Ничего не меняет и не отправляет сообщений.
+    - Просто закрывает "ожидание" на стороне Telegram.
+    """
     await callback.answer()
 
 
@@ -124,7 +398,7 @@ async def fsm_description(message: Message, state: FSMContext) -> None:
     await state.update_data(description=description)
     await state.set_state(TaskCreateFSM.waiting_remind_at)
     await message.answer(
-        "Теперь пришли время *remind_at*: например `18` или `18:30`.",
+        "Теперь пришли время *remind_at*: например `18` или `18:30` или `1830`.",
         parse_mode="Markdown",
     )
 
@@ -173,7 +447,14 @@ async def fsm_remind_at(message: Message, state: FSMContext) -> None:
         return
 
     await state.clear()
+
     await message.answer(f"Task created ✅ (#{task.get('id')})")
+
+    # UX: возвращаем пользователя в меню Personal, чтобы не скроллить вверх
+    await message.answer(
+        "Режим: Лично ✅",
+        reply_markup=mode_menu_kb("personal"),
+    )
 
 
 async def main() -> None:

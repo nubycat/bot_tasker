@@ -15,6 +15,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.exceptions import TelegramNetworkError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -457,15 +458,27 @@ async def fsm_remind_at(message: Message, state: FSMContext) -> None:
     )
 
 
+async def wait_telegram(bot: Bot, tries: int = 10) -> None:
+    for _ in range(tries):
+        try:
+            await bot.get_me(request_timeout=20)
+            return
+        except TelegramNetworkError:
+            await asyncio.sleep(2)
+    await bot.get_me(request_timeout=20)
+
+
 async def main() -> None:
     token = os.getenv("BOT_TOKEN")
     if not token:
         raise RuntimeError("BOT_TOKEN is not set. Put it into bot/.env")
 
     bot = Bot(token=token)
+
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)
 
+    await wait_telegram(bot)
     await dp.start_polling(bot)
 
 

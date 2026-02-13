@@ -26,3 +26,8 @@ class TeamMemberOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class TeamJoinByCode(BaseModel):
+    join_code: str = Field(min_length=16, max_length=16, pattern=r"^[A-Za-z0-9]{16}$")
+    nickname: str = Field(min_length=2, max_length=32)

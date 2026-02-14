@@ -17,10 +17,11 @@ router = APIRouter(prefix="/teams", tags=["teams"])
 
 @router.post("", response_model=TeamOut)
 async def create_team(
-    telegram_id: int,
     payload: TeamCreate,
+    telegram_id: int = Query(gt=0),
     db: AsyncSession = Depends(get_db),
 ):
+
     user = await UserRepository.get_by_telegram_id(db, telegram_id)
     if not user:
         # вариант 1 (строго): просим сначала /users/upsert
@@ -118,3 +119,45 @@ async def join_team_by_code(
         nickname=payload.nickname,
     )
     return member
+
+
+@router.post("/{team_id}/activate")
+async def activate_team(
+    team_id: int,
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found. Call /users/upsert first.",
+        )
+
+    repo = TeamRepository(db)
+    member = await repo.get_member(team_id=team_id, user_id=user.id)
+    if not member:
+        raise HTTPException(status_code=403, detail="Not a team member")
+
+    user.active_team_id = team_id
+    await db.commit()
+    await db.refresh(user)
+    return {"active_team_id": user.active_team_id}
+
+
+@router.post("/deactivate")
+async def deactivate_team(
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found. Call /users/upsert first.",
+        )
+
+    user.active_team_id = None
+    await db.commit()
+    await db.refresh(user)
+    return {"active_team_id": None}

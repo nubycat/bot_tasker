@@ -11,10 +11,10 @@ from alembic import context
 from app.db.base import Base
 
 # IMPORTANT: import models so Alembic sees them
-from app.models import user  # noqa: F401
-from app.models import task  # noqa: F401
-from app.models import team  # noqa: F401
-from app.models import team_member  # noqa: F401
+from app.models import user, task, team
+from app.models import team_member
+
+target_metadata = Base.metadata
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -43,9 +43,6 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-from app.db.base import Base
-
-target_metadata = Base.metadata
 
 
 # other values from the config, defined by the needs of env.py,

@@ -66,6 +66,7 @@ class TaskRepository:
             status="todo",
             owner_user_id=user.id,
             created_by=user.id,
+            team_id=user.active_team_id,
         )
         db.add(task)
         await db.commit()
@@ -76,7 +77,10 @@ class TaskRepository:
     async def list_by_owner(db: AsyncSession, owner_user_id: int) -> list[Task]:
         res = await db.execute(
             select(Task)
-            .where(Task.owner_user_id == owner_user_id)
+            .where(
+                Task.owner_user_id == owner_user_id,
+                Task.team_id.is_(None),
+            )
             .order_by(Task.id.desc())
         )
         return list(res.scalars().all())
@@ -140,6 +144,7 @@ class TaskRepository:
             select(Task).where(
                 Task.id == task_id,
                 Task.owner_user_id == owner_user_id,
+                Task.team_id.is_(None),
             )
         )
         return res.scalar_one_or_none()
@@ -158,6 +163,7 @@ class TaskRepository:
                 Task.due_at >= day_start,
                 Task.due_at < day_end,
                 Task.status == "todo",
+                Task.team_id.is_(None),
             )
             .order_by(Task.due_at.asc())
         )
@@ -177,6 +183,7 @@ class TaskRepository:
                 Task.due_at >= day_start,
                 Task.due_at < day_end,
                 Task.status == "done",
+                Task.team_id.is_(None),
             )
             .order_by(Task.due_at.asc())
         )

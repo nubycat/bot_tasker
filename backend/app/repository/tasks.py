@@ -227,3 +227,35 @@ class TaskRepository:
         await db.commit()
         await db.refresh(task)
         return task
+
+    @staticmethod
+    async def list_today_open_by_team(
+        db: AsyncSession, team_id: int, day_start: datetime, day_end: datetime
+    ) -> list[Task]:
+        res = await db.execute(
+            select(Task)
+            .where(
+                Task.team_id == team_id,
+                Task.due_at >= day_start,
+                Task.due_at < day_end,
+                Task.status == "todo",
+            )
+            .order_by(Task.id.desc())
+        )
+        return list(res.scalars().all())
+
+    @staticmethod
+    async def list_today_done_by_team(
+        db: AsyncSession, team_id: int, day_start: datetime, day_end: datetime
+    ) -> list[Task]:
+        res = await db.execute(
+            select(Task)
+            .where(
+                Task.team_id == team_id,
+                Task.due_at >= day_start,
+                Task.due_at < day_end,
+                Task.status == "done",
+            )
+            .order_by(Task.id.desc())
+        )
+        return list(res.scalars().all())

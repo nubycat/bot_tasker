@@ -10,6 +10,8 @@ from app.schemas.team import (
     TeamJoin,
     TeamMemberOut,
     TeamJoinByCode,
+    TeamJoinIn,
+    TeamJoinOut,
 )
 
 router = APIRouter(prefix="/teams", tags=["teams"])

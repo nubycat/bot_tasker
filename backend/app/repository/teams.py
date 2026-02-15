@@ -94,3 +94,22 @@ class TeamRepository:
             select(Team).where(Team.join_code == join_code)
         )
         return res.scalar_one_or_none()
+
+    @staticmethod
+    async def get_by_join_code(db: AsyncSession, join_code: str) -> Team | None:
+        res = await db.execute(select(Team).where(Team.join_code == join_code))
+        return res.scalar_one_or_none()
+
+    @staticmethod
+    async def ensure_member(db: AsyncSession, *, team_id: int, user_id: int) -> None:
+        res = await db.execute(
+            select(TeamMember).where(
+                TeamMember.team_id == team_id,
+                TeamMember.user_id == user_id,
+            )
+        )
+        if res.scalar_one_or_none():
+            return
+
+        db.add(TeamMember(team_id=team_id, user_id=user_id))
+        await db.commit()

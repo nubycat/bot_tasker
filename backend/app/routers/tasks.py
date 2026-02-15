@@ -182,3 +182,42 @@ async def move_personal_task_to_tomorrow(
         )
 
     return task
+
+
+# handler, который возвращает TodayTasksOut и внутри выбирается personal/team:
+
+
+@router.get("/today", response_model=TodayTasksOut)
+async def list_today(
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Контекстный today:
+    - если active_team_id есть -> today по команде
+    - иначе -> today личные
+    """
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        return {"open": [], "done": []}
+
+    now_local = datetime.now(TZ).replace(tzinfo=None)
+    day_start = datetime.combine(now_local.date(), time.min)
+    day_end = day_start + timedelta(days=1)
+
+    if user.active_team_id:
+        open_tasks = await TaskRepository.list_today_open_by_team(
+            db, user.active_team_id, day_start, day_end
+        )
+        done_tasks = await TaskRepository.list_today_done_by_team(
+            db, user.active_team_id, day_start, day_end
+        )
+    else:
+        open_tasks = await TaskRepository.list_today_open_by_owner(
+            db, user.id, day_start, day_end
+        )
+        done_tasks = await TaskRepository.list_today_done_by_owner(
+            db, user.id, day_start, day_end
+        )
+
+    return {"open": open_tasks, "done": done_tasks}

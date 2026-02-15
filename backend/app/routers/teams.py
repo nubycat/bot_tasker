@@ -163,3 +163,22 @@ async def deactivate_team(
     await db.commit()
     await db.refresh(user)
     return {"active_team_id": None}
+
+
+@router.post("/join", response_model=TeamJoinOut)
+async def join_team(
+    payload: TeamJoinIn,
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    team = await TeamRepository.get_by_join_code(db, payload.join_code)
+    if team is None:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    await TeamRepository.ensure_member(db, team_id=team.id, user_id=user.id)
+
+    return {"team_id": team.id, "name": team.name}

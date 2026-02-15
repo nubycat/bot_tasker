@@ -90,21 +90,23 @@ async def create_task_from_bot(
     )
 
 
-@router.get("/personal/today", response_model=list[TaskOut])
-async def list_personal_today(
-    telegram_id: int = Query(gt=0),
-    db: AsyncSession = Depends(get_db),
-):
-    """Возвращает задачи на сегодня для пользователя по telegram_id."""
-    user = await UserRepository.get_by_telegram_id(db, telegram_id)
-    if user is None:
-        return []
+# ПОТОМ УДАЛИТЬ, НАВЕРНО
 
-    now_msk = datetime.now(TZ).replace(tzinfo=None)
-    day_start = datetime.combine(now_msk.date(), time.min)
-    day_end = day_start + timedelta(days=1)
+# @router.get("/personal/today", response_model=list[TaskOut])
+# async def list_personal_today(
+#     telegram_id: int = Query(gt=0),
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     """Возвращает задачи на сегодня для пользователя по telegram_id."""
+#     user = await UserRepository.get_by_telegram_id(db, telegram_id)
+#     if user is None:
+#         return []
 
-    return await TaskRepository.list_today_by_owner(db, user.id, day_start, day_end)
+#     now_msk = datetime.now(TZ).replace(tzinfo=None)
+#     day_start = datetime.combine(now_msk.date(), time.min)
+#     day_end = day_start + timedelta(days=1)
+
+#     return await TaskRepository.list_today_by_owner(db, user.id, day_start, day_end)
 
 
 @router.get("/personal/{task_id}", response_model=TaskOut)

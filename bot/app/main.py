@@ -130,11 +130,11 @@ async def on_task_add(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-#  Хендлер на кнопку 📅 Today (только для personal)
+#  Хендлер на кнопку 📅 Задачи сегодня (только для personal)
 async def render_today(message, *, tg_id: int) -> None:
     """Рисует список Today (open/done) в указанном message."""
     try:
-        data = await backend_get("/tasks/personal/today", params={"telegram_id": tg_id})
+        data = await backend_get("/tasks/today", params={"telegram_id": tg_id})
     except RequestError:
         await message.answer("Backend недоступен 😕 Попробуй позже.")
         return

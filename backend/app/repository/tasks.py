@@ -192,6 +192,36 @@ class TaskRepository:
         return res.scalars().all()
 
     @staticmethod
+    async def list_today_open_by_team(db, team_id: int, day_start, day_end):
+        stmt = (
+            select(Task)
+            .where(
+                Task.team_id == team_id,
+                Task.due_at >= day_start,
+                Task.due_at < day_end,
+                Task.status == "todo",
+            )
+            .order_by(Task.due_at.asc())
+        )
+        res = await db.execute(stmt)
+        return res.scalars().all()
+
+    @staticmethod
+    async def list_today_done_by_team(db, team_id: int, day_start, day_end):
+        stmt = (
+            select(Task)
+            .where(
+                Task.team_id == team_id,
+                Task.due_at >= day_start,
+                Task.due_at < day_end,
+                Task.status == "done",
+            )
+            .order_by(Task.due_at.asc())
+        )
+        res = await db.execute(stmt)
+        return res.scalars().all()
+
+    @staticmethod
     async def mark_done_personal(
         db, *, task_id: int, owner_user_id: int
     ) -> Task | None:

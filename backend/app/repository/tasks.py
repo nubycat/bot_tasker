@@ -104,6 +104,7 @@ class TaskRepository:
             select(Task)
             .where(
                 Task.owner_user_id == owner_user_id,
+                Task.team_id.is_(None),
                 Task.due_at.is_not(None),
                 Task.due_at >= day_start,
                 Task.due_at < day_end,

@@ -101,7 +101,7 @@ class TeamRepository:
         return res.scalar_one_or_none()
 
     @staticmethod
-    async def ensure_member(db: AsyncSession, *, team_id: int, user_id: int) -> None:
+    async def ensure_member(db, *, team_id: int, user_id: int, nickname: str) -> None:
         res = await db.execute(
             select(TeamMember).where(
                 TeamMember.team_id == team_id,
@@ -111,5 +111,5 @@ class TeamRepository:
         if res.scalar_one_or_none():
             return
 
-        db.add(TeamMember(team_id=team_id, user_id=user_id))
+        db.add(TeamMember(team_id=team_id, user_id=user_id, nickname=nickname))
         await db.commit()

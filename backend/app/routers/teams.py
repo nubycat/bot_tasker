@@ -179,6 +179,12 @@ async def join_team(
     if team is None:
         raise HTTPException(status_code=404, detail="Team not found")
 
-    await TeamRepository.ensure_member(db, team_id=team.id, user_id=user.id)
+    nickname = user.username or user.first_name or f"user_{user.id}"
+    await TeamRepository.ensure_member(
+        db,
+        team_id=team.id,
+        user_id=user.id,
+        nickname=nickname,
+    )
 
     return {"team_id": team.id, "name": team.name}

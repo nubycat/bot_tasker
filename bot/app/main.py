@@ -33,6 +33,15 @@ async def backend_get(path: str, *, params: dict) -> dict | list:
         return r.json()
 
 
+async def backend_post(
+    path: str, *, params: dict | None = None, json: dict | None = None
+):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.post(f"{BACKEND_URL}{path}", params=params, json=json)
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
+
 async def backend_patch(path: str, *, params: dict) -> dict:
     """PATCH JSON from backend."""
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -51,6 +60,10 @@ class TaskCreateFSM(StatesGroup):
     waiting_title = State()
     waiting_description = State()
     waiting_remind_at = State()
+
+
+class TeamJoin(StatesGroup):
+    waiting_join_code = State()
 
 
 # ---------- Keyboards ----------
@@ -94,7 +107,7 @@ async def start(message: Message) -> None:
 
 # ---------- Callbacks ----------
 @router.callback_query(F.data.startswith("mode:"))
-async def on_mode(callback: CallbackQuery) -> None:
+async def on_mode(callback: CallbackQuery, state: FSMContext) -> None:
     data = callback.data or ""
 
     if data == "mode:personal":
@@ -103,9 +116,8 @@ async def on_mode(callback: CallbackQuery) -> None:
         )
 
     elif data == "mode:team":
-        await callback.message.answer(
-            "Режим: Команда ✅", reply_markup=mode_menu_kb("team")
-        )
+        await state.set_state(TeamJoin.waiting_join_code)
+        await callback.message.answer("Пришли join_code команды (код приглашения).")
 
     elif data == "mode:choose":
         await callback.message.answer(
@@ -130,7 +142,7 @@ async def on_task_add(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-#  Хендлер на кнопку 📅 Задачи сегодня (только для personal)
+#  Хендлер на кнопку 📅 Задачи сегодня
 async def render_today(message, *, tg_id: int) -> None:
     """Рисует список Today (open/done) в указанном message."""
     try:
@@ -318,6 +330,7 @@ async def on_task_done(callback: CallbackQuery) -> None:
     await callback.answer("Готово ✅")
 
 
+# Хендлер на клик по кнопке отложить на завтра
 @router.callback_query(F.data.startswith("task_tomorrow:"))
 async def on_task_tomorrow(callback: CallbackQuery) -> None:
     tg_id = callback.from_user.id
@@ -354,6 +367,54 @@ async def on_menu_personal(callback: CallbackQuery) -> None:
         "Меню (лично):", reply_markup=mode_menu_kb("personal")
     )
     await callback.answer()
+
+
+# Хендлер на ввод join_code
+@router.message(TeamJoin.waiting_join_code)
+async def on_join_code(message: Message, state: FSMContext) -> None:
+    join_code = (message.text or "").strip()
+    join_code = join_code.strip('"').strip("'")
+
+    if not join_code:
+        await message.answer("Код пустой. Пришли join_code текстом.")
+        return
+
+    tg_id = message.from_user.id
+
+    # 1) join по коду -> получаем team_id
+    try:
+        data = await backend_post(
+            "/teams/join",
+            params={"telegram_id": tg_id},
+            json={"join_code": join_code},
+        )
+    except RequestError:
+        await message.answer("Backend недоступен 😕 Попробуй позже.")
+        return
+    except HTTPStatusError as e:
+        status = e.response.status_code
+        try:
+            detail = e.response.json().get("detail")
+        except Exception:
+            detail = e.response.text
+
+        await message.answer(f"Ошибка backend: {status} — {detail}")
+        return
+
+    team_id = data.get("team_id")
+    if not team_id:
+        await message.answer("Backend не вернул team_id. Проверь /teams/join.")
+        return
+
+    # 2) activate
+    try:
+        await backend_post(f"/teams/{team_id}/activate", params={"telegram_id": tg_id})
+    except Exception:
+        await message.answer("Команду нашли, но активировать не получилось 😕")
+        return
+
+    await state.clear()
+    await message.answer("Режим: Команда ✅", reply_markup=mode_menu_kb("team"))
 
 
 # Пустой callback: нужен для "информационных" кнопок, которые ничего не делают

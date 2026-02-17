@@ -61,6 +61,32 @@ async def list_personal_today(
     return {"open": open_tasks, "done": done_tasks}
 
 
+@router.get("/team/today", response_model=TodayTasksOut)
+async def list_team_today(
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Возвращает задачи на сегодня для команды по telegram_id (open/done)."""
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        return {"open": [], "done": []}
+
+    if user.active_team_id is None:
+        raise HTTPException(status_code=400, detail="No active team")
+
+    now_local = datetime.now(TZ).replace(tzinfo=None)
+    day_start = datetime.combine(now_local.date(), time.min)
+    day_end = day_start + timedelta(days=1)
+
+    open_tasks = await TaskRepository.list_today_open_by_team(
+        db, user.active_team_id, day_start, day_end
+    )
+    done_tasks = await TaskRepository.list_today_done_by_team(
+        db, user.active_team_id, day_start, day_end
+    )
+    return {"open": open_tasks, "done": done_tasks}
+
+
 @router.get("/personal/count")
 async def count_personal_tasks(
     telegram_id: int = Query(gt=0),
@@ -125,6 +151,34 @@ async def get_personal_task(
         db,
         task_id=task_id,
         owner_user_id=user.id,
+    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
+    return task
+
+
+@router.get("/team/{task_id}", response_model=TaskOut)
+async def get_team_task(
+    task_id: int,
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    if user.active_team_id is None:
+        raise HTTPException(status_code=400, detail="No active team")
+
+    task = await TaskRepository.get_team_by_id(
+        db,
+        task_id=task_id,
+        team_id=user.active_team_id,
     )
     if task is None:
         raise HTTPException(

@@ -150,6 +150,24 @@ class TaskRepository:
         )
         return res.scalar_one_or_none()
 
+    @staticmethod
+    async def get_team_by_id(
+        db: AsyncSession,
+        *,
+        task_id: int,
+        team_id: int,
+    ) -> Task | None:
+        """
+        Получить **командную** задачу по её ID, но **только если она принадлежит** указанному команде.
+        """
+        res = await db.execute(
+            select(Task).where(
+                Task.id == task_id,
+                Task.team_id == team_id,
+            )
+        )
+        return res.scalar_one_or_none()
+
     # TODO: open/done
     @staticmethod
     async def list_today_open_by_owner(db, owner_user_id: int, day_start, day_end):
@@ -185,36 +203,6 @@ class TaskRepository:
                 Task.due_at < day_end,
                 Task.status == "done",
                 Task.team_id.is_(None),
-            )
-            .order_by(Task.due_at.asc())
-        )
-        res = await db.execute(stmt)
-        return res.scalars().all()
-
-    @staticmethod
-    async def list_today_open_by_team(db, team_id: int, day_start, day_end):
-        stmt = (
-            select(Task)
-            .where(
-                Task.team_id == team_id,
-                Task.due_at >= day_start,
-                Task.due_at < day_end,
-                Task.status == "todo",
-            )
-            .order_by(Task.due_at.asc())
-        )
-        res = await db.execute(stmt)
-        return res.scalars().all()
-
-    @staticmethod
-    async def list_today_done_by_team(db, team_id: int, day_start, day_end):
-        stmt = (
-            select(Task)
-            .where(
-                Task.team_id == team_id,
-                Task.due_at >= day_start,
-                Task.due_at < day_end,
-                Task.status == "done",
             )
             .order_by(Task.due_at.asc())
         )

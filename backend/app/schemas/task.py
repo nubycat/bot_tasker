@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 from app.core.time_utils import normalize_time_hhmm
 

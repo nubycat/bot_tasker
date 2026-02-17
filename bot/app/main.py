@@ -130,23 +130,23 @@ async def on_mode(callback: CallbackQuery, state: FSMContext) -> None:
 #  создание задачи
 @router.callback_query(F.data.startswith("task:add:"))
 async def on_task_add(callback: CallbackQuery, state: FSMContext) -> None:
-    # mode  (на будущее)
-    mode = (callback.data or "").split(":")[-1]
-    await state.update_data(mode=mode)
+    data = callback.data or ""
+    mode = data.split(":")[-1]  # personal | team
 
-    # старт FSM
+    await state.update_data(mode=mode)  # ✅ запомнили режим
     await state.set_state(TaskCreateFSM.waiting_title)
-    await callback.message.answer(
-        f"Ок ✅ Создаём задачу ({mode}). Пришли *title*.", parse_mode="Markdown"
-    )
+
+    await callback.message.answer(f"Ок ✅ Создаём задачу ({mode}). Пришли title.")
     await callback.answer()
 
 
 #  Хендлер на кнопку 📅 Задачи сегодня
-async def render_today(message, *, tg_id: int) -> None:
+async def render_today(message, *, tg_id: int, mode: str) -> None:
     """Рисует список Today (open/done) в указанном message."""
     try:
-        data = await backend_get("/tasks/today", params={"telegram_id": tg_id})
+        path = "/tasks/personal/today" if mode == "personal" else "/tasks/team/today"
+        data = await backend_get(path, params={"telegram_id": tg_id})
+
     except RequestError:
         await message.answer("Backend недоступен 😕 Попробуй позже.")
         return
@@ -170,13 +170,17 @@ async def render_today(message, *, tg_id: int) -> None:
         task_id = t["id"]
         title = (t.get("title") or "").strip() or "(без названия)"
         hhmm = format_due_hhmm(t["due_at"])
-        kb.button(text=f"{hhmm} — {title}", callback_data=f"today_task:{task_id}")
+        kb.button(
+            text=f"{hhmm} — {title}", callback_data=f"today_task:{mode}:{task_id}"
+        )
 
     # Выполненные (коротко) — тоже кликабельные
     for t in done_tasks:
         task_id = t["id"]
         title = (t.get("title") or "").strip() or "(без названия)"
-        kb.button(text=f"{title} | Выполнено ✅", callback_data=f"done_task:{task_id}")
+        kb.button(
+            text=f"{title} | Выполнено ✅", callback_data=f"done_task:{mode}:{task_id}"
+        )
 
     kb.button(text="⬅ В меню", callback_data="menu:personal")
     kb.adjust(1)
@@ -467,6 +471,15 @@ async def fsm_description(message: Message, state: FSMContext) -> None:
 
 @router.message(TaskCreateFSM.waiting_remind_at)
 async def fsm_remind_at(message: Message, state: FSMContext) -> None:
+    """
+    Финальный шаг FSM создания задачи:
+    - берём введённое время remind_at
+    - собираем payload из FSM + Telegram user
+    - отправляем POST /tasks в backend
+    - показываем результат и возвращаем пользователя в меню текущего режима (personal/team)
+    """
+
+    # 1) читаем время из сообщения
     remind_at = (message.text or "").strip()
     if not remind_at:
         await message.answer(
@@ -474,22 +487,25 @@ async def fsm_remind_at(message: Message, state: FSMContext) -> None:
         )
         return
 
+    # 2) забираем данные, накопленные в FSM на предыдущих шагах (title/description/mode)
     data = await state.get_data()
 
+    # 3) формируем payload для backend /tasks
     payload = {
         "telegram_id": message.from_user.id,
         "title": data["title"],
         "description": data.get("description"),
-        "remind_at": remind_at,  # backend сам нормализует через схему (18 -> 18:00)
+        "remind_at": remind_at,  # backend сам нормализует (18 -> 18:00)
         "username": message.from_user.username,
         "first_name": message.from_user.first_name,
     }
 
+    # 4) отправляем запрос в backend
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.post(f"{BACKEND_URL}/tasks", json=payload)
 
-            # если время неверное, backend вернет 422 — показываем аккуратно
+            # если формат времени неверный — backend вернёт 422
             if r.status_code == 422:
                 await message.answer(
                     "Неверный формат времени. Пришли `18` или `18:30`.",
@@ -499,24 +515,33 @@ async def fsm_remind_at(message: Message, state: FSMContext) -> None:
 
             r.raise_for_status()
             task = r.json()
+
     except httpx.RequestError:
+        # backend недоступен (нет сети / контейнер упал / таймаут)
         await message.answer("Backend недоступен 😕 Попробуй позже.")
         await state.clear()
         return
+
     except httpx.HTTPStatusError as e:
+        # любые 4xx/5xx кроме 422 (которые мы обработали выше)
         await message.answer(f"Ошибка backend: {e.response.status_code}")
         await state.clear()
         return
 
-    await state.clear()
+    # 5) режим берём из FSM (запомнили его при нажатии "Добавить задачу")
+    mode = data.get("mode", "personal")
 
-    await message.answer(f"Task created ✅ (#{task.get('id')})")
+    # 6) сообщаем об успехе
+    await message.answer(f"Задача создана ✅ (#{task.get('id')})")
 
-    # UX: возвращаем пользователя в меню Personal, чтобы не скроллить вверх
+    # 7) возвращаем пользователя в меню того режима, где он создавал задачу
     await message.answer(
-        "Режим: Лично ✅",
-        reply_markup=mode_menu_kb("personal"),
+        f"Режим: {'Команда' if mode == 'team' else 'Лично'} ✅",
+        reply_markup=mode_menu_kb(mode),
     )
+
+    # 8) чистим FSM ОДИН раз в самом конце
+    await state.clear()
 
 
 async def wait_telegram(bot: Bot, tries: int = 10) -> None:

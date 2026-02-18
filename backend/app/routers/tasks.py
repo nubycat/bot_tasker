@@ -238,6 +238,62 @@ async def move_personal_task_to_tomorrow(
     return task
 
 
+@router.patch("/team/{task_id}/done", response_model=TaskOut)
+async def mark_team_done(
+    task_id: int,
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    if user.active_team_id is None:
+        raise HTTPException(status_code=400, detail="No active team")
+
+    task = await TaskRepository.mark_done_team(
+        db,
+        task_id=task_id,
+        team_id=user.active_team_id,
+    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
+    return task
+
+
+@router.patch("/team/{task_id}/tomorrow", response_model=TaskOut)
+async def move_team_task_to_tomorrow(
+    task_id: int,
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    if user.active_team_id is None:
+        raise HTTPException(status_code=400, detail="No active team")
+
+    task = await TaskRepository.snooze_to_tomorrow_team(
+        db,
+        task_id=task_id,
+        team_id=user.active_team_id,
+    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
+    return task
+
+
 # handler, который возвращает TodayTasksOut и внутри выбирается personal/team:
 
 

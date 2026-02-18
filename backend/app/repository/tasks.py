@@ -248,6 +248,38 @@ class TaskRepository:
         return task
 
     @staticmethod
+    async def mark_done_team(
+        db: AsyncSession,
+        *,
+        task_id: int,
+        team_id: int,
+    ) -> Task | None:
+        task = await TaskRepository.get_team_by_id(db, task_id=task_id, team_id=team_id)
+        if task is None:
+            return None
+
+        task.status = "done"
+        await db.commit()
+        await db.refresh(task)
+        return task
+
+    @staticmethod
+    async def snooze_to_tomorrow_team(
+        db: AsyncSession,
+        *,
+        task_id: int,
+        team_id: int,
+    ) -> Task | None:
+        task = await TaskRepository.get_team_by_id(db, task_id=task_id, team_id=team_id)
+        if task is None:
+            return None
+
+        task.due_at = task.due_at + timedelta(days=1)
+        await db.commit()
+        await db.refresh(task)
+        return task
+
+    @staticmethod
     async def list_today_open_by_team(
         db: AsyncSession, team_id: int, day_start: datetime, day_end: datetime
     ) -> list[Task]:

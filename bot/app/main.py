@@ -111,6 +111,21 @@ async def on_mode(callback: CallbackQuery, state: FSMContext) -> None:
     data = callback.data or ""
 
     if data == "mode:personal":
+        tg_id = callback.from_user.id
+
+        # 1) сбросить активную команду в backend
+        try:
+            await backend_post("/teams/deactivate", params={"telegram_id": tg_id})
+        except RequestError:
+            await callback.message.answer("Backend недоступен 😕 Попробуй позже.")
+            await callback.answer()
+            return
+        except HTTPStatusError as e:
+            await callback.message.answer(f"Ошибка backend: {e.response.status_code}")
+            await callback.answer()
+            return
+
+        # 2) показать меню личного режима
         await callback.message.answer(
             "Режим: Лично ✅", reply_markup=mode_menu_kb("personal")
         )
@@ -140,13 +155,14 @@ async def on_task_add(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-#  Хендлер на кнопку 📅 Задачи сегодня
+# +++++++++ HANDLERS TODAY (personal/team) +++++++++
+
+
 async def render_today(message, *, tg_id: int, mode: str) -> None:
-    """Рисует список Today (open/done) в указанном message."""
+    """Рисует список Today (open/done) для personal/team."""
     try:
         path = "/tasks/personal/today" if mode == "personal" else "/tasks/team/today"
         data = await backend_get(path, params={"telegram_id": tg_id})
-
     except RequestError:
         await message.answer("Backend недоступен 😕 Попробуй позже.")
         return
@@ -158,31 +174,31 @@ async def render_today(message, *, tg_id: int, mode: str) -> None:
     done_tasks = data.get("done", [])
 
     if not open_tasks and not done_tasks:
-        await message.answer(
-            "Сегодня задач нет ✅", reply_markup=mode_menu_kb("personal")
-        )
+        await message.answer("Сегодня задач нет ✅", reply_markup=mode_menu_kb(mode))
         return
 
     kb = InlineKeyboardBuilder()
 
-    # Невыполненные (с временем)
+    # open
     for t in open_tasks:
         task_id = t["id"]
         title = (t.get("title") or "").strip() or "(без названия)"
         hhmm = format_due_hhmm(t["due_at"])
         kb.button(
-            text=f"{hhmm} — {title}", callback_data=f"today_task:{mode}:{task_id}"
+            text=f"{hhmm} — {title}",
+            callback_data=f"today_task:{mode}:{task_id}",
         )
 
-    # Выполненные (коротко) — тоже кликабельные
+    # done
     for t in done_tasks:
         task_id = t["id"]
         title = (t.get("title") or "").strip() or "(без названия)"
         kb.button(
-            text=f"{title} | Выполнено ✅", callback_data=f"done_task:{mode}:{task_id}"
+            text=f"{title} | Выполнено ✅",
+            callback_data=f"done_task:{mode}:{task_id}",
         )
 
-    kb.button(text="⬅ В меню", callback_data="menu:personal")
+    kb.button(text="⬅ В меню", callback_data=f"menu:{mode}")
     kb.adjust(1)
 
     try:
@@ -193,61 +209,73 @@ async def render_today(message, *, tg_id: int, mode: str) -> None:
 
 @router.callback_query(F.data.startswith("task:today:"))
 async def on_today(callback: CallbackQuery) -> None:
-    mode = (callback.data or "").split(":")[-1]
-    if mode != "personal":
-        await callback.message.answer("Today пока только для личных задач ✅")
-        await callback.answer()
-        return
-
+    mode = (callback.data or "").split(":")[-1]  # personal | team
     tg_id = callback.from_user.id
-    await render_today(callback.message, tg_id=tg_id)
+
+    await render_today(callback.message, tg_id=tg_id, mode=mode)
     await callback.answer()
 
 
-# Хендлер на клик по задаче today_task:<id> (детали)
+# +++++++++ HANDLER TASK DETAILS (personal/team) +++++++++
+
+
+def _parse_mode_task_id(data: str) -> tuple[str, int] | None:
+    # ожидаем "today_task:{mode}:{id}" или "done_task:{mode}:{id}"
+    parts = (data or "").split(":")
+    if len(parts) != 3:
+        return None
+    mode = parts[1]
+    try:
+        task_id = int(parts[2])
+    except ValueError:
+        return None
+    if mode not in ("personal", "team"):
+        return None
+    return mode, task_id
+
+
 @router.callback_query(F.data.startswith("today_task:"))
 async def on_today_task(callback: CallbackQuery) -> None:
-    """Open task card from Today list: fetch task details and show formatted message."""
     tg_id = callback.from_user.id
 
-    # 1) Достаём task_id из callback_data вида "today_task:<id>"
-    try:
-        task_id = int((callback.data or "").split(":", 1)[1])
-    except (ValueError, IndexError):
+    parsed = _parse_mode_task_id(callback.data or "")
+    if not parsed:
         await callback.answer()
         return
+    mode, task_id = parsed
 
-    # 2) Запрашиваем детали задачи в backend (проверка доступа идёт по telegram_id)
+    # правильный endpoint
+    path = (
+        f"/tasks/personal/{task_id}" if mode == "personal" else f"/tasks/team/{task_id}"
+    )
+
     try:
-        t = await backend_get(
-            f"/tasks/personal/{task_id}", params={"telegram_id": tg_id}
-        )
+        t = await backend_get(path, params={"telegram_id": tg_id})
     except RequestError:
         await callback.message.answer("Backend недоступен 😕 Попробуй позже.")
         await callback.answer()
         return
     except HTTPStatusError as e:
-        # Backend ответил, но статус не 2xx
         code = e.response.status_code
         if code == HTTPStatus.NOT_FOUND:
-            await callback.message.answer("Задача не найдена или не доступна.")
+            await callback.message.answer("Задача не найдена или недоступна.")
         else:
             await callback.message.answer(f"Ошибка backend: {code}")
         await callback.answer()
         return
 
-    # 3) Формируем карточку (подчищаем пустые поля)
     title = (t.get("title") or "").strip() or "(без названия)"
     desc = (t.get("description") or "").strip() or "(без описания)"
     hhmm = format_due_hhmm(t["due_at"])
-
     text = f"#{t['id']}\n\n{title}\n\n{desc}\n\nВремя: {hhmm}"
 
-    # 4) Кнопки действий
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Выполненно", callback_data=f"task_done:{t['id']}")
-    kb.button(text="⏭ На завтра", callback_data=f"task_tomorrow:{t['id']}")
-    kb.button(text="⬅ Назад к списку", callback_data="task:today:personal")
+
+    # действия доступны и в personal, и в team (но для team backend должен поддерживать эндпоинты)
+    kb.button(text="✅ Выполнено", callback_data=f"task_done:{mode}:{task_id}")
+    kb.button(text="⏭ На завтра", callback_data=f"task_tomorrow:{mode}:{task_id}")
+
+    kb.button(text="⬅ Назад к списку", callback_data=f"task:today:{mode}")
     kb.adjust(2, 1)
 
     try:
@@ -257,23 +285,23 @@ async def on_today_task(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
-# Хендлер на клик по выполненной задаче done_task:<id>
+# HANDLER TASK DONE (personal/team) click fo details
 @router.callback_query(F.data.startswith("done_task:"))
 async def on_done_task(callback: CallbackQuery) -> None:
     tg_id = callback.from_user.id
 
-    # 1) Достаём task_id из callback_data вида "done_task:<id>"
-    try:
-        task_id = int((callback.data or "").split(":", 1)[1])
-    except (ValueError, IndexError):
+    parsed = _parse_mode_task_id(callback.data or "")
+    if not parsed:
         await callback.answer()
         return
+    mode, task_id = parsed
 
-    # 2) Запрашиваем детали задачи
+    path = (
+        f"/tasks/personal/{task_id}" if mode == "personal" else f"/tasks/team/{task_id}"
+    )
+
     try:
-        t = await backend_get(
-            f"/tasks/personal/{task_id}", params={"telegram_id": tg_id}
-        )
+        t = await backend_get(path, params={"telegram_id": tg_id})
     except RequestError:
         await callback.message.answer("Backend недоступен 😕 Попробуй позже.")
         await callback.answer()
@@ -287,16 +315,13 @@ async def on_done_task(callback: CallbackQuery) -> None:
         await callback.answer()
         return
 
-    # 3) Формируем карточку
     title = (t.get("title") or "").strip() or "(без названия)"
     desc = (t.get("description") or "").strip() or "(без описания)"
     hhmm = format_due_hhmm(t["due_at"])
-
     text = f"#{t['id']} ✅ Выполнено\n{title}\n\n{desc}\nВремя: {hhmm}"
 
-    # 4) Только “назад к списку”
     kb = InlineKeyboardBuilder()
-    kb.button(text="⬅ Назад к списку", callback_data="task:today:personal")
+    kb.button(text="⬅ Назад к списку", callback_data=f"task:today:{mode}")
     kb.adjust(1)
 
     try:
@@ -306,21 +331,42 @@ async def on_done_task(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
-# Хендлер на клик по кнопке Done
+# +++++++++ DONE / TOMORROW (personal) +++++++++
+
+
+def _parse_mode_task_id2(data: str) -> tuple[str, int] | None:
+    # ожидаем "task_done:{mode}:{id}" / "task_tomorrow:{mode}:{id}"
+    parts = (data or "").split(":")
+    if len(parts) != 3:
+        return None
+    mode = parts[1]
+    try:
+        task_id = int(parts[2])
+    except ValueError:
+        return None
+    if mode not in ("personal", "team"):
+        return None
+    return mode, task_id
+
+
 @router.callback_query(F.data.startswith("task_done:"))
 async def on_task_done(callback: CallbackQuery) -> None:
     tg_id = callback.from_user.id
 
-    try:
-        task_id = int((callback.data or "").split(":", 1)[1])
-    except (ValueError, IndexError):
+    parsed = _parse_mode_task_id2(callback.data or "")
+    if not parsed:
         await callback.answer("Некорректный id", show_alert=True)
         return
+    mode, task_id = parsed
+
+    path = (
+        f"/tasks/personal/{task_id}/done"
+        if mode == "personal"
+        else f"/tasks/team/{task_id}/done"
+    )
 
     try:
-        await backend_patch(
-            f"/tasks/personal/{task_id}/done", params={"telegram_id": tg_id}
-        )
+        await backend_patch(path, params={"telegram_id": tg_id})
     except RequestError:
         await callback.answer("Backend недоступен 😕", show_alert=True)
         return
@@ -330,7 +376,7 @@ async def on_task_done(callback: CallbackQuery) -> None:
         )
         return
 
-    await render_today(callback.message, tg_id=tg_id)
+    await render_today(callback.message, tg_id=tg_id, mode=mode)
     await callback.answer("Готово ✅")
 
 
@@ -339,16 +385,20 @@ async def on_task_done(callback: CallbackQuery) -> None:
 async def on_task_tomorrow(callback: CallbackQuery) -> None:
     tg_id = callback.from_user.id
 
-    try:
-        task_id = int((callback.data or "").split(":", 1)[1])
-    except (ValueError, IndexError):
+    parsed = _parse_mode_task_id2(callback.data or "")
+    if not parsed:
         await callback.answer("Некорректный id", show_alert=True)
         return
+    mode, task_id = parsed
+
+    path = (
+        f"/tasks/personal/{task_id}/tomorrow"
+        if mode == "personal"
+        else f"/tasks/team/{task_id}/tomorrow"
+    )
 
     try:
-        await backend_patch(
-            f"/tasks/personal/{task_id}/tomorrow", params={"telegram_id": tg_id}
-        )
+        await backend_patch(path, params={"telegram_id": tg_id})
     except RequestError:
         await callback.answer("Backend недоступен 😕", show_alert=True)
         return
@@ -358,17 +408,25 @@ async def on_task_tomorrow(callback: CallbackQuery) -> None:
         )
         return
 
-    # Возвращаемся к списку Today (через render_today, НЕ меняя callback.data)
-    await render_today(callback.message, tg_id=tg_id)
+    await render_today(callback.message, tg_id=tg_id, mode=mode)
     await callback.answer("Перенёс на завтра ⏭")
 
 
-# Хендлер меню личного режима
+# ++++++++++ MENU (personal/team) +++++++++
+
+
 @router.callback_query(F.data == "menu:personal")
 async def on_menu_personal(callback: CallbackQuery) -> None:
-    """Show personal mode menu."""
     await callback.message.edit_text(
         "Меню (лично):", reply_markup=mode_menu_kb("personal")
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "menu:team")
+async def on_menu_team(callback: CallbackQuery) -> None:
+    await callback.message.edit_text(
+        "Меню (команда):", reply_markup=mode_menu_kb("team")
     )
     await callback.answer()
 

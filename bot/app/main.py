@@ -77,10 +77,44 @@ def mode_choose_kb():
 
 def mode_menu_kb(mode: str):
     kb = InlineKeyboardBuilder()
+
     kb.button(text="➕ Добавить задачу", callback_data=f"task:add:{mode}")
     kb.button(text="📅 Задачи сегодня", callback_data=f"task:today:{mode}")
+
+    if mode == "team":
+        kb.button(text="👥 Мои команды", callback_data="team:my")
+        kb.button(text="🔗 Код приглашения", callback_data="team:invite")
+
     kb.button(text="⬅️ Выбор режима", callback_data="mode:choose")
-    kb.adjust(2, 1)
+
+    if mode == "team":
+        kb.adjust(2, 2, 1)
+    else:
+        kb.adjust(2, 1)
+
+    return kb.as_markup()
+
+
+def team_entry_kb():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👥 Мои команды", callback_data="team:my")
+    kb.button(text="🔑 Войти по коду", callback_data="team:join")
+    kb.button(
+        text="➕ Создать команду", callback_data="team:create"
+    )  # можно позже реализовать
+    kb.button(text="⬅ Выбор режима", callback_data="mode:choose")
+    kb.adjust(2, 1, 1)
+    return kb.as_markup()
+
+
+def team_work_kb():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить задачу", callback_data="task:add:team")
+    kb.button(text="📅 Задачи сегодня", callback_data="task:today:team")
+    kb.button(text="👥 Мои команды", callback_data="team:my")
+    kb.button(text="🔗 Код приглашения", callback_data="team:invite")
+    kb.button(text="⬅️ Выбор режима", callback_data="mode:choose")
+    kb.adjust(2, 2, 1)
     return kb.as_markup()
 
 
@@ -131,14 +165,118 @@ async def on_mode(callback: CallbackQuery, state: FSMContext) -> None:
         )
 
     elif data == "mode:team":
-        await state.set_state(TeamJoin.waiting_join_code)
-        await callback.message.answer("Пришли join_code команды (код приглашения).")
+        # "входное" меню команд
+        await callback.message.answer(
+            "Командный режим: выбери действие 👇",
+            reply_markup=team_entry_kb(),
+        )
 
     elif data == "mode:choose":
         await callback.message.answer(
             "Выбери режим работы:", reply_markup=mode_choose_kb()
         )
 
+    await callback.answer()
+
+
+# +++++++++ TEAMS CONTROL MENU +++++++++
+#  вход в команду
+@router.callback_query(F.data == "team:join")
+async def on_team_join(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(TeamJoin.waiting_join_code)
+    await callback.message.answer("Пришли join_code команды (код приглашения).")
+    await callback.answer()
+
+
+# мои команды
+@router.callback_query(F.data == "team:my")
+async def on_team_my(callback: CallbackQuery) -> None:
+    tg_id = callback.from_user.id
+
+    try:
+        data = await backend_get("/teams/my", params={"telegram_id": tg_id})
+    except RequestError:
+        await callback.message.answer("Backend недоступен 😕")
+        await callback.answer()
+        return
+    except HTTPStatusError as e:
+        await callback.message.answer(f"Ошибка backend: {e.response.status_code}")
+        await callback.answer()
+        return
+
+    teams = data.get("teams", [])
+    if not teams:
+        await callback.message.answer("Ты пока не состоишь ни в одной команде.")
+        await callback.answer()
+        return
+
+    kb = InlineKeyboardBuilder()
+    for t in teams:
+        kb.button(text=t["name"], callback_data=f"team:switch:{t['id']}")
+    kb.button(text="⬅ Назад", callback_data="mode:team")  # вернёмся к team_entry_kb
+    kb.adjust(1)
+
+    await callback.message.answer("Выбери команду:", reply_markup=kb.as_markup())
+    await callback.answer()
+
+
+# смена активной команды
+@router.callback_query(F.data.startswith("team:switch:"))
+async def on_team_switch(callback: CallbackQuery) -> None:
+    tg_id = callback.from_user.id
+    team_id_str = (callback.data or "").split(":")[-1]
+
+    if not team_id_str.isdigit():
+        await callback.answer("Некорректный id", show_alert=True)
+        return
+
+    team_id = int(team_id_str)
+
+    try:
+        await backend_post(f"/teams/{team_id}/activate", params={"telegram_id": tg_id})
+    except RequestError:
+        await callback.message.answer("Backend недоступен 😕")
+        await callback.answer()
+        return
+    except HTTPStatusError as e:
+        await callback.message.answer(f"Ошибка backend: {e.response.status_code}")
+        await callback.answer()
+        return
+
+    await callback.message.answer(
+        "Активная команда изменена ✅",
+        reply_markup=team_work_kb(),
+    )
+    await callback.answer()
+
+
+# код приглашения
+@router.callback_query(F.data == "team:invite")
+async def on_team_invite(callback: CallbackQuery) -> None:
+    tg_id = callback.from_user.id
+
+    try:
+        data = await backend_get(
+            "/teams/active/join_code", params={"telegram_id": tg_id}
+        )
+    except RequestError:
+        await callback.message.answer("Backend недоступен 😕")
+        await callback.answer()
+        return
+    except HTTPStatusError as e:
+        await callback.message.answer(f"Ошибка backend: {e.response.status_code}")
+        await callback.answer()
+        return
+
+    join_code = data.get("join_code")
+    if not join_code:
+        await callback.message.answer("Backend не вернул join_code 😕")
+        await callback.answer()
+        return
+
+    await callback.message.answer(
+        f"Код приглашения: `{join_code}`", parse_mode="Markdown"
+    )
     await callback.answer()
 
 
@@ -425,9 +563,7 @@ async def on_menu_personal(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "menu:team")
 async def on_menu_team(callback: CallbackQuery) -> None:
-    await callback.message.edit_text(
-        "Меню (команда):", reply_markup=mode_menu_kb("team")
-    )
+    await callback.message.edit_text("Меню (команда):", reply_markup=team_work_kb())
     await callback.answer()
 
 
@@ -476,7 +612,7 @@ async def on_join_code(message: Message, state: FSMContext) -> None:
         return
 
     await state.clear()
-    await message.answer("Режим: Команда ✅", reply_markup=mode_menu_kb("team"))
+    await message.answer("Режим: Команда ✅", reply_markup=team_work_kb())
 
 
 # Пустой callback: нужен для "информационных" кнопок, которые ничего не делают

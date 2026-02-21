@@ -100,6 +100,12 @@ class TeamRepository:
         res = await db.execute(select(Team).where(Team.join_code == join_code))
         return res.scalar_one_or_none()
 
+    #
+    @staticmethod
+    async def get_by_id(db: AsyncSession, team_id: int) -> Team | None:
+        res = await db.execute(select(Team).where(Team.id == team_id))
+        return res.scalar_one_or_none()
+
     @staticmethod
     async def ensure_member(db, *, team_id: int, user_id: int, nickname: str) -> None:
         res = await db.execute(
@@ -113,3 +119,15 @@ class TeamRepository:
 
         db.add(TeamMember(team_id=team_id, user_id=user_id, nickname=nickname))
         await db.commit()
+
+    # Get all teams for user
+    @staticmethod
+    async def list_for_user(db: AsyncSession, *, user_id: int) -> list[Team]:
+        stmt = (
+            select(Team)
+            .join(TeamMember, TeamMember.team_id == Team.id)
+            .where(TeamMember.user_id == user_id)
+            .order_by(Team.id.desc())
+        )
+        res = await db.execute(stmt)
+        return list(res.scalars().all())

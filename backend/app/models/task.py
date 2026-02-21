@@ -1,6 +1,8 @@
 from datetime import datetime
-from sqlalchemy import String, DateTime, ForeignKey, Text
-from sqlalchemy.orm import Mapped, mapped_column
+
+from sqlalchemy import String, DateTime, ForeignKey, Text, Integer
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.db.base import Base
 
 
@@ -22,3 +24,20 @@ class Task(Base):
         nullable=True,
         index=True,
     )
+
+    # NEW: who completed task (team member)
+    done_by_member_id: Mapped[int | None] = mapped_column(
+        ForeignKey("team_members.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    done_by_member: Mapped["TeamMember | None"] = relationship(
+        "TeamMember",
+        lazy="selectin",
+        foreign_keys=[done_by_member_id],
+    )
+
+    @property
+    def done_by_nickname(self) -> str | None:
+        return self.done_by_member.nickname if self.done_by_member else None

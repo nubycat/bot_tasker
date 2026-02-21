@@ -4,6 +4,8 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.task import Task
+from app.models.team_member import TeamMember
+
 from app.repository.users import UserRepository
 
 
@@ -88,7 +90,10 @@ class TaskRepository:
     @staticmethod
     async def count_by_owner(db: AsyncSession, owner_user_id: int) -> int:
         res = await db.execute(
-            select(func.count(Task.id)).where(Task.owner_user_id == owner_user_id)
+            select(func.count(Task.id)).where(
+                Task.owner_user_id == owner_user_id,
+                Task.team_id.is_(None),
+            )
         )
         return int(res.scalar_one())
 
@@ -253,12 +258,26 @@ class TaskRepository:
         *,
         task_id: int,
         team_id: int,
+        user_id: int,
     ) -> Task | None:
         task = await TaskRepository.get_team_by_id(db, task_id=task_id, team_id=team_id)
         if task is None:
             return None
 
+        # найти участника команды (чтобы взять его nickname)
+        res = await db.execute(
+            select(TeamMember).where(
+                TeamMember.team_id == team_id,
+                TeamMember.user_id == user_id,
+            )
+        )
+        member = res.scalar_one_or_none()
+        if member is None:
+            return None  # человек не участник команды
+
         task.status = "done"
+        task.done_by_member_id = member.id
+
         await db.commit()
         await db.refresh(task)
         return task

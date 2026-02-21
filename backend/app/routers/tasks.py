@@ -257,6 +257,7 @@ async def mark_team_done(
         db,
         task_id=task_id,
         team_id=user.active_team_id,
+        user_id=user.id,
     )
     if task is None:
         raise HTTPException(
@@ -266,53 +267,56 @@ async def mark_team_done(
     return task
 
 
-# routers team
-@router.patch("/team/{task_id}/done", response_model=TaskOut)
-async def done_team_task(
-    task_id: int,
-    telegram_id: int = Query(gt=0),
-    db: AsyncSession = Depends(get_db),
-):
-    user = await UserRepository.get_by_telegram_id(db, telegram_id)
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    if user.active_team_id is None:
-        raise HTTPException(status_code=400, detail="Active team is not set")
+#  На удаление не забыть
 
-    task = await TaskRepository.get_team_by_id(
-        db, task_id=task_id, team_id=user.active_team_id
-    )
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
+# @router.patch("/team/{task_id}/done", response_model=TaskOut)
+# async def done_team_task(
+#     task_id: int,
+#     telegram_id: int = Query(gt=0),
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     user = await UserRepository.get_by_telegram_id(db, telegram_id)
+#     if user is None:
+#         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+#     if user.active_team_id is None:
+#         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Active team is not set")
 
-    task.status = "done"
-    await db.commit()
-    await db.refresh(task)
-    return task
+#     task = await TaskRepository.get_team_by_id(
+#         db, task_id=task_id, team_id=user.active_team_id
+#     )
+#     if task is None:
+#         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+#     task.status = "done"
+#     await db.commit()
+#     await db.refresh(task)
+#     return task
 
 
-@router.patch("/team/{task_id}/tomorrow", response_model=TaskOut)
-async def tomorrow_team_task(
-    task_id: int,
-    telegram_id: int = Query(gt=0),
-    db: AsyncSession = Depends(get_db),
-):
-    user = await UserRepository.get_by_telegram_id(db, telegram_id)
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    if user.active_team_id is None:
-        raise HTTPException(status_code=400, detail="Active team is not set")
+# На удаление не забыть (ручник)
 
-    task = await TaskRepository.get_team_by_id(
-        db, task_id=task_id, team_id=user.active_team_id
-    )
-    if task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
+# @router.patch("/team/{task_id}/tomorrow", response_model=TaskOut)
+# async def tomorrow_team_task(
+#     task_id: int,
+#     telegram_id: int = Query(gt=0),
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     user = await UserRepository.get_by_telegram_id(db, telegram_id)
+#     if user is None:
+#         raise HTTPException(status_code=404, detail="User not found")
+#     if user.active_team_id is None:
+#         raise HTTPException(status_code=400, detail="Active team is not set")
 
-    task.due_at = task.due_at + timedelta(days=1)
-    await db.commit()
-    await db.refresh(task)
-    return task
+#     task = await TaskRepository.get_team_by_id(
+#         db, task_id=task_id, team_id=user.active_team_id
+#     )
+#     if task is None:
+#         raise HTTPException(status_code=404, detail="Task not found")
+
+#     task.due_at = task.due_at + timedelta(days=1)
+#     await db.commit()
+#     await db.refresh(task)
+#     return task
 
 
 @router.patch("/team/{task_id}/tomorrow", response_model=TaskOut)

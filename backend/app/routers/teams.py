@@ -23,18 +23,15 @@ async def create_team(
     telegram_id: int = Query(gt=0),
     db: AsyncSession = Depends(get_db),
 ):
-
     user = await UserRepository.get_by_telegram_id(db, telegram_id)
-    if not user:
-        # вариант 1 (строго): просим сначала /users/upsert
+    if user is None:
         raise HTTPException(
-            status_code=400, detail="User not found. Call /users/upsert first."
+            status.HTTP_400_BAD_REQUEST,
+            detail="User not found. Call /users/upsert first.",
         )
 
-        # вариант 2 (мягко): auto-upsert (если хочешь так)
-        # user = await UserRepository.upsert(db, telegram_id=telegram_id, username=None, first_name=payload.nickname)
-
     repo = TeamRepository(db)
+
     try:
         team = await repo.create_team_with_creator(
             name=payload.name,
@@ -42,7 +39,14 @@ async def create_team(
             nickname=payload.nickname,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+
+    # ✅ ключ: сразу делаем команду активной у создателя
+    user.active_team_id = team.id
+    await db.commit()
+    await db.refresh(user)
 
     return team
 
@@ -114,13 +118,20 @@ async def join_team_by_code(
 
     team = await repo.get_team_by_code(payload.join_code)
     if not team:
-        raise HTTPException(status_code=404, detail="Invalid join_code")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Invalid join_code")
 
     member = await repo.join_team(
         team_id=team.id,
         user_id=user.id,
         nickname=payload.nickname,
     )
+
+    # ✅ авто-активация команды после join
+    user.active_team_id = team.id
+    await db.commit()
+    await db.refresh(user)
+    await db.refresh(member)
+
     return member
 
 
@@ -190,6 +201,9 @@ async def join_team(
         user_id=user.id,
         nickname=nickname,
     )
+
+    user.active_team_id = team.id
+    await db.commit()
 
     return {"team_id": team.id, "name": team.name}
 

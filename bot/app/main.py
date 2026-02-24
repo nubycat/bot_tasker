@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 
 
 import httpx
@@ -55,6 +56,36 @@ def format_due_hhmm(iso_dt: str) -> str:
     return datetime.fromisoformat(iso_dt).strftime("%H:%M")
 
 
+def normalize_hhmm(raw: str) -> str | None:
+    s = (raw or "").strip()
+
+    # 18 -> 18:00
+    if re.fullmatch(r"\d{1,2}", s):
+        h = int(s)
+        if 0 <= h <= 23:
+            return f"{h:02d}:00"
+        return None
+
+    # 1830 -> 18:30
+    if re.fullmatch(r"\d{4}", s):
+        h = int(s[:2])
+        m = int(s[2:])
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            return f"{h:02d}:{m:02d}"
+        return None
+
+    # 18:30 -> 18:30
+    m1 = re.fullmatch(r"(\d{1,2}):(\d{2})", s)
+    if m1:
+        h = int(m1.group(1))
+        m = int(m1.group(2))
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            return f"{h:02d}:{m:02d}"
+        return None
+
+    return None
+
+
 # ---------- FSM ----------
 class TaskCreateFSM(StatesGroup):
     waiting_title = State()
@@ -64,6 +95,11 @@ class TaskCreateFSM(StatesGroup):
 
 class TeamJoin(StatesGroup):
     waiting_join_code = State()
+
+
+class TeamCreateFSM(StatesGroup):
+    waiting_team_name = State()
+    waiting_nickname = State()
 
 
 # ---------- Keyboards ----------
@@ -218,6 +254,79 @@ async def on_team_my(callback: CallbackQuery) -> None:
 
     await callback.message.answer("Выбери команду:", reply_markup=kb.as_markup())
     await callback.answer()
+
+
+# хендлер на кнопку team:create
+
+
+@router.callback_query(F.data == "team:create")
+async def on_team_create(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(TeamCreateFSM.waiting_team_name)
+    await callback.message.answer("Пришли *название команды*.", parse_mode="Markdown")
+    await callback.answer()
+
+
+# создание команды создание ника
+@router.message(TeamCreateFSM.waiting_team_name)
+async def on_team_create_name(message: Message, state: FSMContext) -> None:
+    name = (message.text or "").strip()
+    if not name:
+        await message.answer("Название пустое. Пришли нормальное название команды.")
+        return
+
+    await state.update_data(team_name=name)
+    await state.set_state(TeamCreateFSM.waiting_nickname)
+    await message.answer(
+        "Теперь пришли *свой ник в команде* (например `Arsu`).", parse_mode="Markdown"
+    )
+
+
+# создание команды создание ника
+@router.message(TeamCreateFSM.waiting_nickname)
+async def on_team_create_nickname(message: Message, state: FSMContext) -> None:
+    nickname = (message.text or "").strip()
+    nickname = nickname.strip('"').strip("'")
+    if not nickname:
+        await message.answer("Ник пустой. Пришли ник текстом.")
+        return
+
+    data = await state.get_data()
+    team_name = data.get("team_name")
+    tg_id = message.from_user.id
+
+    try:
+        team = await backend_post(
+            "/teams",
+            params={"telegram_id": tg_id},
+            json={"name": team_name, "nickname": nickname},
+        )
+    except RequestError:
+        await message.answer("Backend недоступен 😕 Попробуй позже.")
+        await state.clear()
+        return
+    except HTTPStatusError as e:
+        # покажем detail если есть
+        try:
+            detail = e.response.json().get("detail")
+        except Exception:
+            detail = e.response.text
+        await message.answer(f"Ошибка backend: {e.response.status_code} — {detail}")
+        await state.clear()
+        return
+
+    # На всякий случай активируем созданную команду
+    team_id = team.get("id")
+    if team_id:
+        try:
+            await backend_post(
+                f"/teams/{team_id}/activate", params={"telegram_id": tg_id}
+            )
+        except Exception:
+            pass
+
+    await state.clear()
+    await message.answer(f"Команда создана ✅ {team.get('name')} (#{team_id})")
+    await message.answer("Режим: Команда ✅", reply_markup=team_work_kb())
 
 
 # смена активной команды
@@ -674,10 +783,13 @@ async def fsm_remind_at(message: Message, state: FSMContext) -> None:
     """
 
     # 1) читаем время из сообщения
-    remind_at = (message.text or "").strip()
+    raw = (message.text or "").strip()
+    remind_at = normalize_hhmm(raw)
+
     if not remind_at:
         await message.answer(
-            "Время пустое. Пришли `18` или `18:30`.", parse_mode="Markdown"
+            "Неверный формат времени. Примеры: `18`, `18:30`, `1830`, `09:05`.",
+            parse_mode="Markdown",
         )
         return
 

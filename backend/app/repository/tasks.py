@@ -1,4 +1,7 @@
+import os
+
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +10,9 @@ from app.models.task import Task
 from app.models.team_member import TeamMember
 
 from app.repository.users import UserRepository
+
+
+APP_TZ = ZoneInfo(os.getenv("APP_TZ", "UTC"))
 
 
 class TaskRepository:
@@ -52,13 +58,17 @@ class TaskRepository:
             first_name=first_name,
         )
 
-        # 2) "HH:MM" -> datetime (today)
+        # 2) "HH:MM" -> datetime (today) in APP_TZ, BUT store naive (no tzinfo)
         hh, mm = map(int, remind_at.split(":"))
-        now = datetime.now()
 
+        now = datetime.now(APP_TZ).replace(tzinfo=None)  # naive "по Москве"
         due_at = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+
         if due_at <= now:
-            due_at = due_at + timedelta(days=1)
+            due_at += timedelta(days=1)
+
+        # на всякий случай (чтобы не словить tzinfo случайно)
+        due_at = due_at.replace(tzinfo=None)
 
         # 3) create task
         task = Task(

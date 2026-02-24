@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 from app.core.time_utils import normalize_time_hhmm
 
@@ -15,8 +16,11 @@ class TaskOut(BaseModel):
     description: str | None
     due_at: datetime | None
     status: str
-    owner_user_id: int
     created_by: int
+    owner_user_id: int
+
+    team_id: int | None = None
+    done_by_nickname: str | None = None
 
     class Config:
         from_attributes = True

@@ -61,6 +61,32 @@ async def list_personal_today(
     return {"open": open_tasks, "done": done_tasks}
 
 
+@router.get("/team/today", response_model=TodayTasksOut)
+async def list_team_today(
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Возвращает задачи на сегодня для команды по telegram_id (open/done)."""
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        return {"open": [], "done": []}
+
+    if user.active_team_id is None:
+        raise HTTPException(status_code=400, detail="No active team")
+
+    now_local = datetime.now(TZ).replace(tzinfo=None)
+    day_start = datetime.combine(now_local.date(), time.min)
+    day_end = day_start + timedelta(days=1)
+
+    open_tasks = await TaskRepository.list_today_open_by_team(
+        db, user.active_team_id, day_start, day_end
+    )
+    done_tasks = await TaskRepository.list_today_done_by_team(
+        db, user.active_team_id, day_start, day_end
+    )
+    return {"open": open_tasks, "done": done_tasks}
+
+
 @router.get("/personal/count")
 async def count_personal_tasks(
     telegram_id: int = Query(gt=0),
@@ -90,21 +116,23 @@ async def create_task_from_bot(
     )
 
 
-@router.get("/personal/today", response_model=list[TaskOut])
-async def list_personal_today(
-    telegram_id: int = Query(gt=0),
-    db: AsyncSession = Depends(get_db),
-):
-    """Возвращает задачи на сегодня для пользователя по telegram_id."""
-    user = await UserRepository.get_by_telegram_id(db, telegram_id)
-    if user is None:
-        return []
+# ПОТОМ УДАЛИТЬ, НАВЕРНО
 
-    now_msk = datetime.now(TZ).replace(tzinfo=None)
-    day_start = datetime.combine(now_msk.date(), time.min)
-    day_end = day_start + timedelta(days=1)
+# @router.get("/personal/today", response_model=list[TaskOut])
+# async def list_personal_today(
+#     telegram_id: int = Query(gt=0),
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     """Возвращает задачи на сегодня для пользователя по telegram_id."""
+#     user = await UserRepository.get_by_telegram_id(db, telegram_id)
+#     if user is None:
+#         return []
 
-    return await TaskRepository.list_today_by_owner(db, user.id, day_start, day_end)
+#     now_msk = datetime.now(TZ).replace(tzinfo=None)
+#     day_start = datetime.combine(now_msk.date(), time.min)
+#     day_end = day_start + timedelta(days=1)
+
+#     return await TaskRepository.list_today_by_owner(db, user.id, day_start, day_end)
 
 
 @router.get("/personal/{task_id}", response_model=TaskOut)
@@ -123,6 +151,34 @@ async def get_personal_task(
         db,
         task_id=task_id,
         owner_user_id=user.id,
+    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
+    return task
+
+
+@router.get("/team/{task_id}", response_model=TaskOut)
+async def get_team_task(
+    task_id: int,
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    if user.active_team_id is None:
+        raise HTTPException(status_code=400, detail="No active team")
+
+    task = await TaskRepository.get_team_by_id(
+        db,
+        task_id=task_id,
+        team_id=user.active_team_id,
     )
     if task is None:
         raise HTTPException(
@@ -180,3 +236,151 @@ async def move_personal_task_to_tomorrow(
         )
 
     return task
+
+
+@router.patch("/team/{task_id}/done", response_model=TaskOut)
+async def mark_team_done(
+    task_id: int,
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    if user.active_team_id is None:
+        raise HTTPException(status_code=400, detail="No active team")
+
+    task = await TaskRepository.mark_done_team(
+        db,
+        task_id=task_id,
+        team_id=user.active_team_id,
+        user_id=user.id,
+    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
+    return task
+
+
+#  На удаление не забыть
+
+# @router.patch("/team/{task_id}/done", response_model=TaskOut)
+# async def done_team_task(
+#     task_id: int,
+#     telegram_id: int = Query(gt=0),
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     user = await UserRepository.get_by_telegram_id(db, telegram_id)
+#     if user is None:
+#         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+#     if user.active_team_id is None:
+#         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Active team is not set")
+
+#     task = await TaskRepository.get_team_by_id(
+#         db, task_id=task_id, team_id=user.active_team_id
+#     )
+#     if task is None:
+#         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+#     task.status = "done"
+#     await db.commit()
+#     await db.refresh(task)
+#     return task
+
+
+# На удаление не забыть (ручник)
+
+# @router.patch("/team/{task_id}/tomorrow", response_model=TaskOut)
+# async def tomorrow_team_task(
+#     task_id: int,
+#     telegram_id: int = Query(gt=0),
+#     db: AsyncSession = Depends(get_db),
+# ):
+#     user = await UserRepository.get_by_telegram_id(db, telegram_id)
+#     if user is None:
+#         raise HTTPException(status_code=404, detail="User not found")
+#     if user.active_team_id is None:
+#         raise HTTPException(status_code=400, detail="Active team is not set")
+
+#     task = await TaskRepository.get_team_by_id(
+#         db, task_id=task_id, team_id=user.active_team_id
+#     )
+#     if task is None:
+#         raise HTTPException(status_code=404, detail="Task not found")
+
+#     task.due_at = task.due_at + timedelta(days=1)
+#     await db.commit()
+#     await db.refresh(task)
+#     return task
+
+
+@router.patch("/team/{task_id}/tomorrow", response_model=TaskOut)
+async def move_team_task_to_tomorrow(
+    task_id: int,
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    if user.active_team_id is None:
+        raise HTTPException(status_code=400, detail="No active team")
+
+    task = await TaskRepository.snooze_to_tomorrow_team(
+        db,
+        task_id=task_id,
+        team_id=user.active_team_id,
+    )
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
+    return task
+
+
+# handler, который возвращает TodayTasksOut и внутри выбирается personal/team:
+
+
+@router.get("/today", response_model=TodayTasksOut)
+async def list_today(
+    telegram_id: int = Query(gt=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Контекстный today:
+    - если active_team_id есть -> today по команде
+    - иначе -> today личные
+    """
+    user = await UserRepository.get_by_telegram_id(db, telegram_id)
+    if user is None:
+        return {"open": [], "done": []}
+
+    now_local = datetime.now(TZ).replace(tzinfo=None)
+    day_start = datetime.combine(now_local.date(), time.min)
+    day_end = day_start + timedelta(days=1)
+
+    if user.active_team_id:
+        open_tasks = await TaskRepository.list_today_open_by_team(
+            db, user.active_team_id, day_start, day_end
+        )
+        done_tasks = await TaskRepository.list_today_done_by_team(
+            db, user.active_team_id, day_start, day_end
+        )
+    else:
+        open_tasks = await TaskRepository.list_today_open_by_owner(
+            db, user.id, day_start, day_end
+        )
+        done_tasks = await TaskRepository.list_today_done_by_owner(
+            db, user.id, day_start, day_end
+        )
+
+    return {"open": open_tasks, "done": done_tasks}

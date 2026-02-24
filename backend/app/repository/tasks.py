@@ -1,10 +1,18 @@
+import os
+
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.task import Task
+from app.models.team_member import TeamMember
+
 from app.repository.users import UserRepository
+
+
+APP_TZ = ZoneInfo(os.getenv("APP_TZ", "UTC"))
 
 
 class TaskRepository:
@@ -50,13 +58,17 @@ class TaskRepository:
             first_name=first_name,
         )
 
-        # 2) "HH:MM" -> datetime (today)
+        # 2) "HH:MM" -> datetime (today) in APP_TZ, BUT store naive (no tzinfo)
         hh, mm = map(int, remind_at.split(":"))
-        now = datetime.now()
 
+        now = datetime.now(APP_TZ).replace(tzinfo=None)  # naive "по Москве"
         due_at = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+
         if due_at <= now:
-            due_at = due_at + timedelta(days=1)
+            due_at += timedelta(days=1)
+
+        # на всякий случай (чтобы не словить tzinfo случайно)
+        due_at = due_at.replace(tzinfo=None)
 
         # 3) create task
         task = Task(
@@ -66,6 +78,7 @@ class TaskRepository:
             status="todo",
             owner_user_id=user.id,
             created_by=user.id,
+            team_id=user.active_team_id,
         )
         db.add(task)
         await db.commit()
@@ -76,7 +89,10 @@ class TaskRepository:
     async def list_by_owner(db: AsyncSession, owner_user_id: int) -> list[Task]:
         res = await db.execute(
             select(Task)
-            .where(Task.owner_user_id == owner_user_id)
+            .where(
+                Task.owner_user_id == owner_user_id,
+                Task.team_id.is_(None),
+            )
             .order_by(Task.id.desc())
         )
         return list(res.scalars().all())
@@ -84,7 +100,10 @@ class TaskRepository:
     @staticmethod
     async def count_by_owner(db: AsyncSession, owner_user_id: int) -> int:
         res = await db.execute(
-            select(func.count(Task.id)).where(Task.owner_user_id == owner_user_id)
+            select(func.count(Task.id)).where(
+                Task.owner_user_id == owner_user_id,
+                Task.team_id.is_(None),
+            )
         )
         return int(res.scalar_one())
 
@@ -100,6 +119,7 @@ class TaskRepository:
             select(Task)
             .where(
                 Task.owner_user_id == owner_user_id,
+                Task.team_id.is_(None),
                 Task.due_at.is_not(None),
                 Task.due_at >= day_start,
                 Task.due_at < day_end,
@@ -140,6 +160,25 @@ class TaskRepository:
             select(Task).where(
                 Task.id == task_id,
                 Task.owner_user_id == owner_user_id,
+                Task.team_id.is_(None),
+            )
+        )
+        return res.scalar_one_or_none()
+
+    @staticmethod
+    async def get_team_by_id(
+        db: AsyncSession,
+        *,
+        task_id: int,
+        team_id: int,
+    ) -> Task | None:
+        """
+        Получить **командную** задачу по её ID, но **только если она принадлежит** указанному команде.
+        """
+        res = await db.execute(
+            select(Task).where(
+                Task.id == task_id,
+                Task.team_id == team_id,
             )
         )
         return res.scalar_one_or_none()
@@ -158,6 +197,7 @@ class TaskRepository:
                 Task.due_at >= day_start,
                 Task.due_at < day_end,
                 Task.status == "todo",
+                Task.team_id.is_(None),
             )
             .order_by(Task.due_at.asc())
         )
@@ -177,6 +217,7 @@ class TaskRepository:
                 Task.due_at >= day_start,
                 Task.due_at < day_end,
                 Task.status == "done",
+                Task.team_id.is_(None),
             )
             .order_by(Task.due_at.asc())
         )
@@ -220,3 +261,81 @@ class TaskRepository:
         await db.commit()
         await db.refresh(task)
         return task
+
+    @staticmethod
+    async def mark_done_team(
+        db: AsyncSession,
+        *,
+        task_id: int,
+        team_id: int,
+        user_id: int,
+    ) -> Task | None:
+        task = await TaskRepository.get_team_by_id(db, task_id=task_id, team_id=team_id)
+        if task is None:
+            return None
+
+        # найти участника команды (чтобы взять его nickname)
+        res = await db.execute(
+            select(TeamMember).where(
+                TeamMember.team_id == team_id,
+                TeamMember.user_id == user_id,
+            )
+        )
+        member = res.scalar_one_or_none()
+        if member is None:
+            return None  # человек не участник команды
+
+        task.status = "done"
+        task.done_by_member_id = member.id
+
+        await db.commit()
+        await db.refresh(task)
+        return task
+
+    @staticmethod
+    async def snooze_to_tomorrow_team(
+        db: AsyncSession,
+        *,
+        task_id: int,
+        team_id: int,
+    ) -> Task | None:
+        task = await TaskRepository.get_team_by_id(db, task_id=task_id, team_id=team_id)
+        if task is None:
+            return None
+
+        task.due_at = task.due_at + timedelta(days=1)
+        await db.commit()
+        await db.refresh(task)
+        return task
+
+    @staticmethod
+    async def list_today_open_by_team(
+        db: AsyncSession, team_id: int, day_start: datetime, day_end: datetime
+    ) -> list[Task]:
+        res = await db.execute(
+            select(Task)
+            .where(
+                Task.team_id == team_id,
+                Task.due_at >= day_start,
+                Task.due_at < day_end,
+                Task.status == "todo",
+            )
+            .order_by(Task.id.desc())
+        )
+        return list(res.scalars().all())
+
+    @staticmethod
+    async def list_today_done_by_team(
+        db: AsyncSession, team_id: int, day_start: datetime, day_end: datetime
+    ) -> list[Task]:
+        res = await db.execute(
+            select(Task)
+            .where(
+                Task.team_id == team_id,
+                Task.due_at >= day_start,
+                Task.due_at < day_end,
+                Task.status == "done",
+            )
+            .order_by(Task.id.desc())
+        )
+        return list(res.scalars().all())

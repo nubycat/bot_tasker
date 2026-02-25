@@ -27,33 +27,51 @@ Telegram → Bot (aiogram) → FastAPI → PostgreSQL
 
 ## ✨ Возможности (на текущий момент)
 
-### Реализовано
+### ✅ Реализовано
 
-* ✅ Telegram-бот (aiogram)
-* ✅ FastAPI backend
-* ✅ PostgreSQL
-* ✅ SQLAlchemy 2.0 (async)
-* ✅ Alembic миграции
-* ✅ Модель пользователей (Telegram ID)
-* ✅ Модель задач
-* ✅ Создание задач через API
-* ✅ Docker + docker-compose
-* ✅ Чистая структура проекта
-* ✅ Парсинг времени (18, 18:30)
+* Telegram-бот (aiogram)
 
-### В процессе
+* FastAPI backend
 
-* ⏳ FSM в Telegram-боте (UX-пошаговый ввод задачи)
-* ⏳ Напоминания по времени
-* ⏳ Статусы задач
+* PostgreSQL
 
-### Планируется
+* SQLAlchemy 2.0 (async)
 
-* 🔜 Командные задачи
+* Alembic миграции
+
+* Docker + docker-compose
+
+* Модель пользователей (Telegram ID)
+
+* Модель задач
+
+* Создание задач через API
+
+* Парсинг времени (18, 18:30)
+
+* FSM (пошаговый ввод задачи)
+
+* Team mode (create / join / active context)
+
+* Разделение personal / team задач
+
+* Базовые статусы задач
+
+* Timezone support (APP_TZ)
+
+### 🚧 В процессе
+
+* ⏳ Отображение, кто именно выполнил задачу в team mode
+* ⏳ Улучшение UX командного режима
+
+
+### 🗺 Планируется
+
+* 🔜 Напоминания по времени (scheduler / background worker)
 * 🔜 Роли и права доступа
 * 🔜 Pytest (endpoint + DB tests)
 * 🔜 CI (GitHub Actions)
-* 🔜 Mini App / Web UI
+
 
 ---
 
@@ -61,25 +79,30 @@ Telegram → Bot (aiogram) → FastAPI → PostgreSQL
 
 ```
 bot_tasker/
-├── bot/                # Telegram bot (aiogram)
+
+├── bot/                         # Telegram bot (aiogram)
 │   ├── app/
-│   │   ├── handlers/
-│   │   ├── states/
-│   │   └── main.py
+│   │   ├── handlers/            # Message & callback handlers
+│   │   ├── states/              # FSM states
+│   │   └── main.py              # Bot entrypoint
 │   └── requirements.txt
-│
-├── backend/            # FastAPI backend
+
+├── backend/                     # FastAPI backend
 │   ├── app/
-│   │   ├── core/       # config, settings
-│   │   ├── db/         # database, session
-│   │   ├── models/     # SQLAlchemy models
-│   │   ├── schemas/    # Pydantic schemas
-│   │   ├── repository/# DB access layer
-│   │   ├── routers/   # API endpoints
-│   │   └── main.py
-│   ├── alembic/
+│   │   ├── core/                # Settings, config, timezone
+│   │   ├── db/                  # DB engine & session
+│   │   ├── models/              # SQLAlchemy models
+│   │   │   ├── user.py
+│   │   │   ├── task.py
+│   │   │   ├── team.py
+│   │   │   └── team_member.py
+│   │   ├── schemas/             # Pydantic schemas
+│   │   ├── repository/          # DB access layer
+│   │   ├── routers/             # API endpoints
+│   │   └── main.py              # FastAPI entrypoint
+│   ├── alembic/                 # DB migrations
 │   └── requirements.txt
-│
+
 ├── docker-compose.yml
 ├── .env.example
 └── README.md
@@ -181,8 +204,11 @@ GitHub: [https://github.com/nubycat](https://github.com/nubycat)
 
 ## 📌 Статус
 
-> 🚧 Active development
-> Проект развивается и используется как основное портфолио для backend-ролей
+> 🚀 MVP завершён (end-to-end рабочий продукт)
+Проект полностью функционирует и может быть запущен локально через Docker.
+Основная логика (личные задачи, командный режим, разделение personal / team контекста, timezone support) реализована и стабильна.
+
+>🔧 Проект поддерживается и может дорабатываться точечно в рамках roadmap.
 
 ---
 

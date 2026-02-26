@@ -62,15 +62,15 @@ Telegram → Bot (aiogram) → FastAPI → PostgreSQL
 ### 🚧 В процессе
 
 * ⏳ Отображение, кто именно выполнил задачу в team mode
-* ⏳ Улучшение UX командного режима
-
+* ⏳ Pytest (endpoint + DB tests)
 
 ### 🗺 Планируется
 
 * 🔜 Напоминания по времени (scheduler / background worker)
 * 🔜 Роли и права доступа
-* 🔜 Pytest (endpoint + DB tests)
+* 🔜 Улучшение UX командного режима
 * 🔜 CI (GitHub Actions)
+* 🔜 Больше тестов
 
 
 ---
